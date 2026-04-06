@@ -1,0 +1,253 @@
+from __future__ import annotations
+
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+from common import load_json, save_json
+
+
+def build_weekly_dashboard(daily_dir: str, week_start: str, output_path: str) -> None:
+    daily_path = Path(daily_dir)
+
+    daily_files = sorted(daily_path.glob("*.json"))
+    selected = []
+
+    week_end = None
+
+    for file in daily_files:
+        day = file.stem
+        if week_start <= day <= week_start[:8] + "99":
+            selected.append(file)
+
+    # simple 7-day window based on lexical date ordering
+    selected = [f for f in daily_files if f.stem >= week_start][:7]
+
+    if not selected:
+        raise FileNotFoundError(f"No daily dashboard files found from {week_start} in {daily_dir}")
+
+    summary = {
+        "totalPlates": 0,
+        "totalPieces": 0,
+        "receivingPlates": 0,
+        "receivingPieces": 0,
+        "avgPiecesPerPlate": 0,
+    }
+
+    operators_by_user = {}
+    assigned_areas = defaultdict(lambda: {"area": None, "plates": 0, "pieces": 0, "userIds": set()})
+    observed_areas = defaultdict(
+        lambda: {
+            "areaCode": None,
+            "areaName": None,
+            "letdownMoves": 0,
+            "putawayMoves": 0,
+            "restockMoves": 0,
+            "totalMoves": 0,
+            "actualMinutes": 0,
+            "standardMinutes": 0,
+            "userIds": set(),
+        }
+    )
+    receiving_by_user = {}
+    audit_summary = {
+        "usersWithMissingAreaMix": set(),
+        "usersWithMissingManualAssignment": set(),
+        "unknownAreaRows": 0,
+        "negativeTransactions": 0,
+    }
+
+    for file in selected:
+        data = load_json(file)
+        week_end = data["date"]
+
+        s = data.get("summary", {})
+        summary["totalPlates"] += s.get("totalPlates", 0)
+        summary["totalPieces"] += s.get("totalPieces", 0)
+        summary["receivingPlates"] += s.get("receivingPlates", 0)
+        summary["receivingPieces"] += s.get("receivingPieces", 0)
+
+        for op in data.get("operators", []):
+            userid = op["userid"]
+            if userid not in operators_by_user:
+                operators_by_user[userid] = {
+                    "userid": userid,
+                    "name": op.get("name", userid),
+                    "assignedRole": op.get("assignedRole"),
+                    "assignedArea": op.get("assignedArea"),
+                    "letdownPlates": 0,
+                    "letdownPieces": 0,
+                    "putawayPlates": 0,
+                    "putawayPieces": 0,
+                    "restockPlates": 0,
+                    "restockPieces": 0,
+                    "receivingPlates": 0,
+                    "receivingPieces": 0,
+                    "totalPlates": 0,
+                    "totalPieces": 0,
+                    "avgPiecesPerPlate": 0,
+                    "areaMix": defaultdict(
+                        lambda: {
+                            "areaCode": None,
+                            "areaName": None,
+                            "letdownMoves": 0,
+                            "putawayMoves": 0,
+                            "restockMoves": 0,
+                            "actualMinutes": 0,
+                            "standardMinutes": 0,
+                            "totalMoves": 0,
+                        }
+                    ),
+                    "auditFlags": set(),
+                }
+
+            agg = operators_by_user[userid]
+            agg["name"] = op.get("name") or agg["name"]
+            agg["assignedRole"] = op.get("assignedRole") or agg["assignedRole"]
+            agg["assignedArea"] = op.get("assignedArea") or agg["assignedArea"]
+
+            for key in [
+                "letdownPlates",
+                "letdownPieces",
+                "putawayPlates",
+                "putawayPieces",
+                "restockPlates",
+                "restockPieces",
+                "receivingPlates",
+                "receivingPieces",
+                "totalPlates",
+                "totalPieces",
+            ]:
+                agg[key] += op.get(key, 0)
+
+            for mix in op.get("areaMix", []):
+                mix_key = (mix["areaCode"], mix["areaName"])
+                m = agg["areaMix"][mix_key]
+                m["areaCode"] = mix["areaCode"]
+                m["areaName"] = mix["areaName"]
+                m["letdownMoves"] += mix.get("letdownMoves", 0)
+                m["putawayMoves"] += mix.get("putawayMoves", 0)
+                m["restockMoves"] += mix.get("restockMoves", 0)
+                m["actualMinutes"] += mix.get("actualMinutes", 0)
+                m["standardMinutes"] += mix.get("standardMinutes", 0)
+                m["totalMoves"] += mix.get("totalMoves", 0)
+
+            for flag in op.get("auditFlags", []):
+                agg["auditFlags"].add(flag)
+
+        for area in data.get("assignedAreas", []):
+            key = area["area"]
+            a = assigned_areas[key]
+            a["area"] = area["area"]
+            a["plates"] += area.get("plates", 0)
+            a["pieces"] += area.get("pieces", 0)
+
+        # recover user membership for assigned area from operators
+        for op in data.get("operators", []):
+            if op.get("assignedArea"):
+                assigned_areas[op["assignedArea"]]["userIds"].add(op["userid"])
+
+        for area in data.get("observedAreas", []):
+            key = (area["areaCode"], area["areaName"])
+            a = observed_areas[key]
+            a["areaCode"] = area["areaCode"]
+            a["areaName"] = area["areaName"]
+            a["letdownMoves"] += area.get("letdownMoves", 0)
+            a["putawayMoves"] += area.get("putawayMoves", 0)
+            a["restockMoves"] += area.get("restockMoves", 0)
+            a["totalMoves"] += area.get("totalMoves", 0)
+            a["actualMinutes"] += area.get("actualMinutes", 0)
+            a["standardMinutes"] += area.get("standardMinutes", 0)
+
+        for op in data.get("operators", []):
+            for mix in op.get("areaMix", []):
+                observed_areas[(mix["areaCode"], mix["areaName"])]["userIds"].add(op["userid"])
+
+        for rec in data.get("receiving", []):
+            userid = rec["userid"]
+            if userid not in receiving_by_user:
+                receiving_by_user[userid] = {
+                    "userid": userid,
+                    "name": rec.get("name", userid),
+                    "plates": 0,
+                    "pieces": 0,
+                }
+            receiving_by_user[userid]["plates"] += rec.get("plates", 0)
+            receiving_by_user[userid]["pieces"] += rec.get("pieces", 0)
+
+        audit = data.get("auditSummary", {})
+        audit_summary["usersWithMissingAreaMix"].update(audit.get("usersWithMissingAreaMix", []))
+        audit_summary["usersWithMissingManualAssignment"].update(audit.get("usersWithMissingManualAssignment", []))
+        audit_summary["unknownAreaRows"] += audit.get("unknownAreaRows", 0)
+        audit_summary["negativeTransactions"] += audit.get("negativeTransactions", 0)
+
+    operators = []
+    for op in operators_by_user.values():
+        area_mix = list(op["areaMix"].values())
+        area_mix.sort(key=lambda x: (-x["totalMoves"], x["areaName"]))
+        op["areaMix"] = area_mix
+        op["auditFlags"] = sorted(op["auditFlags"])
+        op["avgPiecesPerPlate"] = round(op["totalPieces"] / op["totalPlates"], 2) if op["totalPlates"] else 0
+        operators.append(op)
+
+    operators.sort(key=lambda x: x["totalPieces"], reverse=True)
+
+    assigned_area_list = []
+    for area, vals in sorted(assigned_areas.items()):
+        assigned_area_list.append(
+            {
+                "area": vals["area"],
+                "plates": vals["plates"],
+                "pieces": vals["pieces"],
+                "userCount": len(vals["userIds"]),
+            }
+        )
+
+    observed_area_list = []
+    for (_, _), vals in sorted(observed_areas.items(), key=lambda item: (item[1]["areaName"], item[1]["areaCode"])):
+        observed_area_list.append(
+            {
+                "areaCode": vals["areaCode"],
+                "areaName": vals["areaName"],
+                "letdownMoves": vals["letdownMoves"],
+                "putawayMoves": vals["putawayMoves"],
+                "restockMoves": vals["restockMoves"],
+                "totalMoves": vals["totalMoves"],
+                "actualMinutes": vals["actualMinutes"],
+                "standardMinutes": vals["standardMinutes"],
+                "userCount": len(vals["userIds"]),
+            }
+        )
+
+    receiving = list(receiving_by_user.values())
+    receiving.sort(key=lambda x: x["pieces"], reverse=True)
+
+    summary["avgPiecesPerPlate"] = round(summary["totalPieces"] / summary["totalPlates"], 2) if summary["totalPlates"] else 0
+
+    payload = {
+        "weekStart": week_start,
+        "weekEnd": week_end,
+        "sourceDates": [f.stem for f in selected],
+        "summary": summary,
+        "operators": operators,
+        "assignedAreas": assigned_area_list,
+        "observedAreas": observed_area_list,
+        "receiving": receiving,
+        "auditSummary": {
+            "usersWithMissingAreaMix": sorted(audit_summary["usersWithMissingAreaMix"]),
+            "usersWithMissingManualAssignment": sorted(audit_summary["usersWithMissingManualAssignment"]),
+            "unknownAreaRows": audit_summary["unknownAreaRows"],
+            "negativeTransactions": audit_summary["negativeTransactions"],
+        },
+    }
+
+    save_json(output_path, payload)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 4:
+        print("Usage: python3 build_weekly_dashboard.py <daily_dir> <week_start> <output_json>")
+        sys.exit(1)
+
+    build_weekly_dashboard(sys.argv[1], sys.argv[2], sys.argv[3])
+    print(f"Wrote {sys.argv[3]}")

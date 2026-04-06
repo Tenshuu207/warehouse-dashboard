@@ -1,0 +1,39 @@
+{
+  "areas": [
+    "Dry",
+    "Seafood/Chicken/Iced Produce",
+    "Cooler",
+    "Produce Cooler",
+    "Dry PIR",
+    "Freezer",
+    "Freezer PIR",
+    "Receiving",
+    "Inventory",
+    "Night Shift",
+    "Delivery Drivers"
+  ],
+  "roles": [
+    "FrzPut",
+    "FrzLet",
+    "FrzMix",
+    "FrzPIR",
+    "DryMix",
+    "DryFlr",
+    "DryPIR",
+    "ClrMeat",
+    "ClrDairy",
+    "Produce",
+    "Extra",
+    "DryRcv",
+    "ClrRcv",
+    "FrzRcv",
+    "MixRcv",
+    "NSDrp",
+    "Intern"
+  ],
+  "reviewStatuses": [
+    "pending",
+    "reviewed",
+    "dismissed"
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "employees": {
+    "EMP0005": {
+      "displayName": "Aaron Gagne",
+      "status": "active",
+      "defaultTeam": "Freezer"
+    },
+    "EMP0002": {
+      "displayName": "Bradley Melanson",
+      "status": "active",
+      "defaultTeam": "Freezer"
+    },
+    "EMP0006": {
+      "displayName": "Chris Simmons",
+      "status": "active",
+      "defaultTeam": "Dry"
+    },
+    "EMP0008": {
+      "displayName": "David Malo",
+      "status": "active",
+      "defaultTeam": "Night Shift"
+    },
+    "EMP0009": {
+      "displayName": "David Westerman",
+      "status": "active",
+      "defaultTeam": "Freezer PIR"
+    },
+    "EMP0007": {
+      "displayName": "Dwight Lingley",
+      "status": "active",
+      "defaultTeam": "Cooler"
+    },
+    "EMP0010": {
+      "displayName": "Jesse Lewin",
+      "status": "active",
+      "defaultTeam": "Receiving"
+    },
+    "EMP0001": {
+      "displayName": "Keith Makela",
+      "status": "active",
+      "defaultTeam": "Inventory"
+    },
+    "EMP0011": {
+      "displayName": "Lliam Breingan",
+      "status": "active",
+      "defaultTeam": "Receiving"
+    },
+    "EMP0012": {
+      "displayName": "Philip Philyaw",
+      "status": "active",
+      "defaultTeam": "Dry PIR"
+    },
+    "EMP0014": {
+      "displayName": "Reece Miller",
+      "status": "active",
+      "defaultTeam": "Cooler"
+    },
+    "EMP0015": {
+      "displayName": "Ryan Cormier",
+      "status": "active",
+      "defaultTeam": "Freezer"
+    },
+    "EMP0013": {
+      "displayName": "Ryan Rowe",
+      "status": "active",
+      "defaultTeam": "Receiving"
+    },
+    "EMP0016": {
+      "displayName": "Scott Bell",
+      "status": "active",
+      "defaultTeam": "Dry"
+    },
+    "EMP0003": {
+      "displayName": "Shawn Finley",
+      "status": "active",
+      "defaultTeam": "Receiving"
+    }
+  }
+}

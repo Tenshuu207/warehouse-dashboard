@@ -1,0 +1,447 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import DashboardNav from "@/components/dashboard-nav";
+import TeamGroupSummary from "@/components/team-group-summary";
+import ControlBar from "@/components/control-bar";
+import { useAppState } from "@/lib/app-state";
+import { getWeekData, type ResolvedDashboardData } from "@/lib/data-resolver";
+import {
+  resolveOperatorIdentity,
+  type EmployeeRecord,
+  type OperatorDefault,
+  type RfMapping,
+} from "@/lib/employee-identity";
+
+type DefaultsResponse = {
+  operators: Record<string, OperatorDefault>;
+};
+
+type EmployeesResponse = {
+  employees: Record<string, EmployeeRecord>;
+};
+
+type MappingsResponse = {
+  mappings: RfMapping[];
+};
+
+const CORE_BUCKETS = ["Dry", "Cooler", "Freezer", "Receiving"];
+
+function bucketize(area: string | null | undefined): string {
+  const value = (area || "").toLowerCase();
+
+  if (value.includes("receiving")) return "Receiving";
+  if (value.includes("freezer")) return "Freezer";
+  if (value.includes("cooler") || value.includes("produce")) return "Cooler";
+  if (value.includes("dry")) return "Dry";
+  return "";
+}
+
+function matchesRequestedTeam(
+  requestedTeam: string,
+  effectiveArea: string | null | undefined,
+  resolvedDefaultTeam: string
+): boolean {
+  if (CORE_BUCKETS.includes(requestedTeam)) {
+    return bucketize(effectiveArea) === requestedTeam;
+  }
+  return resolvedDefaultTeam === requestedTeam;
+}
+
+function ratio(pieces: number, plates: number): number {
+  return plates ? Number((pieces / plates).toFixed(2)) : 0;
+}
+
+function performance(actual: number, standard: number): number {
+  return actual ? Number(((standard / actual) * 100).toFixed(1)) : 0;
+}
+
+export default function AreasPage() {
+  const { selectedWeek } = useAppState();
+  const searchParams = useSearchParams();
+  const requestedTeam = searchParams.get("team") || "Cooler";
+
+  const [data, setData] = useState<ResolvedDashboardData | null>(null);
+  const [defaults, setDefaults] = useState<Record<string, OperatorDefault>>({});
+  const [employees, setEmployees] = useState<Record<string, EmployeeRecord>>({});
+  const [mappings, setMappings] = useState<RfMapping[]>([]);
+  const [validTeams, setValidTeams] = useState<string[]>(["Dry", "Cooler", "Freezer", "Receiving", "Other"]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const [weekData, defaultsRes, employeesRes, mappingsRes] = await Promise.all([
+          getWeekData(selectedWeek),
+          fetch("/api/operator-defaults", { cache: "no-store" }),
+          fetch("/api/employees", { cache: "no-store" }),
+          fetch("/api/rf-mappings", { cache: "no-store" }),
+        ]);
+
+        const defaultsJson: DefaultsResponse = defaultsRes.ok ? await defaultsRes.json() : { operators: {} };
+        const employeesJson: EmployeesResponse & { validTeams?: string[] } = employeesRes.ok
+          ? await employeesRes.json()
+          : { employees: {}, validTeams: ["Dry", "Cooler", "Freezer", "Receiving", "Other"] };
+        const mappingsJson: MappingsResponse = mappingsRes.ok ? await mappingsRes.json() : { mappings: [] };
+
+        if (!cancelled) {
+          setData(weekData);
+          setDefaults(defaultsJson.operators || {});
+          setEmployees(employeesJson.employees || {});
+          setMappings(Array.isArray(mappingsJson.mappings) ? mappingsJson.mappings : []);
+          setValidTeams(
+            Array.isArray(employeesJson.validTeams) && employeesJson.validTeams.length
+              ? employeesJson.validTeams
+              : ["Dry", "Cooler", "Freezer", "Receiving", "Other"]
+          );
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load area data");
+          setData(null);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedWeek]);
+
+  const operators = useMemo(() => data?.operators ?? [], [data]);
+
+  const filteredOperators = useMemo(() => {
+    return operators
+      .map((op) => {
+        const resolved = resolveOperatorIdentity({
+          rfUsername: op.userid,
+          fallbackName: op.name,
+          fallbackTeam: op.rawAssignedArea || op.effectiveAssignedArea || op.assignedArea || op.area,
+          selectedDate: selectedWeek,
+          employees,
+          mappings,
+          defaultTeams: defaults,
+        });
+
+        return {
+          ...op,
+          resolvedName: resolved.displayName,
+          resolvedDefaultTeam: resolved.defaultTeam,
+        };
+      })
+      .filter((op) =>
+        matchesRequestedTeam(
+          requestedTeam,
+          op.effectiveAssignedArea || op.assignedArea || op.area || op.rawAssignedArea,
+          op.resolvedDefaultTeam
+        )
+      )
+      .sort((a, b) => a.resolvedName.localeCompare(b.resolvedName));
+  }, [operators, defaults, employees, mappings, requestedTeam, selectedWeek]);
+
+  const summary = useMemo(() => {
+    const out = {
+      operatorCount: filteredOperators.length,
+      replenishmentPlates: 0,
+      replenishmentPieces: 0,
+      receivingPlates: 0,
+      receivingPieces: 0,
+      putawayPlates: 0,
+      putawayPieces: 0,
+      letdownPlates: 0,
+      letdownPieces: 0,
+      restockPlates: 0,
+      restockPieces: 0,
+      actualMinutes: 0,
+      standardMinutes: 0,
+    };
+
+    for (const op of filteredOperators) {
+      out.replenishmentPlates += op.replenishmentPlates;
+      out.replenishmentPieces += op.replenishmentPieces;
+      out.receivingPlates += op.receivingPlates;
+      out.receivingPieces += op.receivingPieces;
+      out.putawayPlates += op.putawayPlates;
+      out.putawayPieces += op.putawayPieces;
+      out.letdownPlates += op.letdownPlates;
+      out.letdownPieces += op.letdownPieces;
+      out.restockPlates += op.restockPlates;
+      out.restockPieces += op.restockPieces;
+      out.actualMinutes += op.actualMinutes;
+      out.standardMinutes += op.standardMinutes;
+    }
+
+    return out;
+  }, [filteredOperators]);
+
+  const roles = useMemo(() => {
+    const byRole = new Map<
+      string,
+      {
+        role: string;
+        operatorCount: number;
+        replenishmentPlates: number;
+        replenishmentPieces: number;
+        receivingPieces: number;
+        putawayPlates: number;
+        putawayPieces: number;
+        letdownPlates: number;
+        letdownPieces: number;
+        restockPlates: number;
+        restockPieces: number;
+        actualMinutes: number;
+        standardMinutes: number;
+      }
+    >();
+
+    for (const op of filteredOperators) {
+      const role = op.effectiveAssignedRole || op.rawAssignedRole || "Unassigned";
+      const current = byRole.get(role) || {
+        role,
+        operatorCount: 0,
+        replenishmentPlates: 0,
+        replenishmentPieces: 0,
+        receivingPieces: 0,
+        putawayPlates: 0,
+        putawayPieces: 0,
+        letdownPlates: 0,
+        letdownPieces: 0,
+        restockPlates: 0,
+        restockPieces: 0,
+        actualMinutes: 0,
+        standardMinutes: 0,
+      };
+
+      current.operatorCount += 1;
+      current.replenishmentPlates += op.replenishmentPlates;
+      current.replenishmentPieces += op.replenishmentPieces;
+      current.receivingPieces += op.receivingPieces;
+      current.putawayPlates += op.putawayPlates;
+      current.putawayPieces += op.putawayPieces;
+      current.letdownPlates += op.letdownPlates;
+      current.letdownPieces += op.letdownPieces;
+      current.restockPlates += op.restockPlates;
+      current.restockPieces += op.restockPieces;
+      current.actualMinutes += op.actualMinutes;
+      current.standardMinutes += op.standardMinutes;
+
+      byRole.set(role, current);
+    }
+
+    return [...byRole.values()].sort((a, b) => a.role.localeCompare(b.role));
+  }, [filteredOperators]);
+
+  return (
+    <main className="min-h-screen bg-slate-100 text-slate-900 p-3 md:p-4">
+      <div className="max-w-[1700px] xl:ml-0 xl:mr-auto space-y-4 min-w-0">
+        <DashboardNav />
+        <ControlBar />
+
+        <section className="rounded-2xl bg-white border shadow-sm p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold">{requestedTeam} Area</h2>
+              <p className="mt-1 text-xs text-slate-600">
+                Team summary, role breakdown, and individual breakdown for {requestedTeam}.
+              </p>
+            </div>
+
+            <div className="text-right text-xs text-slate-500">
+              <div>{selectedWeek}</div>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {validTeams.map((team) => (
+              <Link
+                key={team}
+                href={`/areas?team=${encodeURIComponent(team)}`}
+                className={`rounded-full border px-3 py-1.5 text-sm ${
+                  requestedTeam === team
+                    ? "bg-slate-900 text-white border-slate-900"
+                    : "bg-white text-slate-700 border-slate-300"
+                }`}
+              >
+                {team}
+              </Link>
+            ))}
+          </div>
+        </section>
+
+        {loading && (
+          <section className="rounded-2xl bg-white border shadow-sm p-4 text-sm text-slate-600">
+            Loading area data...
+          </section>
+        )}
+
+        {error && (
+          <section className="rounded-2xl bg-white border shadow-sm p-4 text-sm text-red-600">
+            {error}
+          </section>
+        )}
+
+        {!loading && !error && (
+          <>
+            <section className="rounded-2xl bg-white border shadow-sm p-4">
+              <div className="grid grid-cols-2 xl:grid-cols-6 gap-3">
+                <div className="rounded-xl border bg-slate-50 p-3 text-center">
+                  <div className="text-[11px] text-slate-500">Operators</div>
+                  <div className="mt-2 text-2xl font-semibold">{summary.operatorCount}</div>
+                </div>
+                <div className="rounded-xl border bg-slate-50 p-3 text-center">
+                  <div className="text-[11px] text-slate-500">Total Plates</div>
+                  <div className="mt-2 text-2xl font-semibold">{summary.replenishmentPlates.toLocaleString()}</div>
+                </div>
+                <div className="rounded-xl border bg-slate-50 p-3 text-center">
+                  <div className="text-[11px] text-slate-500">Total Pieces</div>
+                  <div className="mt-2 text-2xl font-semibold">{summary.replenishmentPieces.toLocaleString()}</div>
+                </div>
+                <div className="rounded-xl border bg-slate-50 p-3 text-center">
+                  <div className="text-[11px] text-slate-500">PCs/Plate</div>
+                  <div className="mt-2 text-2xl font-semibold">
+                    {ratio(summary.replenishmentPieces, summary.replenishmentPlates).toFixed(2)}
+                  </div>
+                </div>
+                <div className="rounded-xl border bg-slate-50 p-3 text-center">
+                  <div className="text-[11px] text-slate-500">Receiving Pieces</div>
+                  <div className="mt-2 text-2xl font-semibold">{summary.receivingPieces.toLocaleString()}</div>
+                </div>
+                <div className="rounded-xl border bg-slate-50 p-3 text-center">
+                  <div className="text-[11px] text-slate-500">Performance</div>
+                  <div className="mt-2 text-2xl font-semibold">
+                    {performance(summary.actualMinutes, summary.standardMinutes).toFixed(1)}%
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl bg-white border shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b bg-slate-50">
+                <h3 className="font-semibold">Role Breakdown</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[1400px] text-sm">
+                  <thead className="bg-slate-50 border-b">
+                    <tr className="text-left">
+                      <th className="px-4 py-3 font-semibold">Role</th>
+                      <th className="px-3 py-3 text-right font-semibold">Operators</th>
+                      <th className="px-3 py-3 text-right font-semibold">Total Plates</th>
+                      <th className="px-3 py-3 text-right font-semibold">Total Pieces</th>
+                      <th className="px-3 py-3 text-right font-semibold">PCs/Plate</th>
+                      <th className="px-3 py-3 text-right font-semibold">Putaway Plates</th>
+                      <th className="px-3 py-3 text-right font-semibold">Putaway Pieces</th>
+                      <th className="px-3 py-3 text-right font-semibold">Putaway PCs/Plate</th>
+                      <th className="px-3 py-3 text-right font-semibold">Letdown Plates</th>
+                      <th className="px-3 py-3 text-right font-semibold">Letdown Pieces</th>
+                      <th className="px-3 py-3 text-right font-semibold">Letdown PCs/Plate</th>
+                      <th className="px-3 py-3 text-right font-semibold">Restock Plates</th>
+                      <th className="px-3 py-3 text-right font-semibold">Restock Pieces</th>
+                      <th className="px-3 py-3 text-right font-semibold">Restock PCs/Plate</th>
+                      <th className="px-3 py-3 text-right font-semibold">Receiving Pieces</th>
+                      <th className="px-3 py-3 text-right font-semibold">Performance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {roles.map((role) => (
+                      <tr key={role.role} className="border-b last:border-b-0">
+                        <td className="px-4 py-3">{role.role}</td>
+                        <td className="px-3 py-3 text-right">{role.operatorCount}</td>
+                        <td className="px-3 py-3 text-right">{role.replenishmentPlates.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{role.replenishmentPieces.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{ratio(role.replenishmentPieces, role.replenishmentPlates).toFixed(2)}</td>
+                        <td className="px-3 py-3 text-right">{role.putawayPlates.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{role.putawayPieces.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{ratio(role.putawayPieces, role.putawayPlates).toFixed(2)}</td>
+                        <td className="px-3 py-3 text-right">{role.letdownPlates.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{role.letdownPieces.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{ratio(role.letdownPieces, role.letdownPlates).toFixed(2)}</td>
+                        <td className="px-3 py-3 text-right">{role.restockPlates.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{role.restockPieces.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{ratio(role.restockPieces, role.restockPlates).toFixed(2)}</td>
+                        <td className="px-3 py-3 text-right">{role.receivingPieces.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{performance(role.actualMinutes, role.standardMinutes).toFixed(1)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section className="rounded-2xl bg-white border shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b bg-slate-50">
+                <h3 className="font-semibold">Individuals</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[1500px] text-sm">
+                  <thead className="bg-slate-50 border-b">
+                    <tr className="text-left">
+                      <th className="px-4 py-3 font-semibold">Name</th>
+                      <th className="px-3 py-3 font-semibold">RF Username</th>
+                      <th className="px-3 py-3 font-semibold">Role</th>
+                      <th className="px-3 py-3 text-right font-semibold">Total Plates</th>
+                      <th className="px-3 py-3 text-right font-semibold">Total Pieces</th>
+                      <th className="px-3 py-3 text-right font-semibold">PCs/Plate</th>
+                      <th className="px-3 py-3 text-right font-semibold">Putaway Plates</th>
+                      <th className="px-3 py-3 text-right font-semibold">Putaway Pieces</th>
+                      <th className="px-3 py-3 text-right font-semibold">Putaway PCs/Plate</th>
+                      <th className="px-3 py-3 text-right font-semibold">Letdown Plates</th>
+                      <th className="px-3 py-3 text-right font-semibold">Letdown Pieces</th>
+                      <th className="px-3 py-3 text-right font-semibold">Letdown PCs/Plate</th>
+                      <th className="px-3 py-3 text-right font-semibold">Restock Plates</th>
+                      <th className="px-3 py-3 text-right font-semibold">Restock Pieces</th>
+                      <th className="px-3 py-3 text-right font-semibold">Restock PCs/Plate</th>
+                      <th className="px-3 py-3 text-right font-semibold">Receiving Pieces</th>
+                      <th className="px-3 py-3 text-right font-semibold">Performance</th>
+                      <th className="px-3 py-3 font-semibold">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredOperators.map((op) => (
+                      <tr key={op.userid} className="border-b last:border-b-0 hover:bg-slate-50">
+                        <td className="px-4 py-3">
+                          <Link href={`/operators/${op.userid}`} className="font-semibold hover:underline">
+                            {op.resolvedName}
+                          </Link>
+                        </td>
+                        <td className="px-3 py-3 text-slate-500">{op.userid}</td>
+                        <td className="px-3 py-3">{op.effectiveAssignedRole || op.rawAssignedRole || "Unassigned"}</td>
+                        <td className="px-3 py-3 text-right">{op.replenishmentPlates.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{op.replenishmentPieces.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{op.replenishmentPcsPerPlate.toFixed(2)}</td>
+                        <td className="px-3 py-3 text-right">{op.putawayPlates.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{op.putawayPieces.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{op.putawayPcsPerPlate.toFixed(2)}</td>
+                        <td className="px-3 py-3 text-right">{op.letdownPlates.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{op.letdownPieces.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{op.letdownPcsPerPlate.toFixed(2)}</td>
+                        <td className="px-3 py-3 text-right">{op.restockPlates.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{op.restockPieces.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{op.restockPcsPerPlate.toFixed(2)}</td>
+                        <td className="px-3 py-3 text-right">{op.receivingPieces.toLocaleString()}</td>
+                        <td className="px-3 py-3 text-right">{op.performanceVsStandard.toFixed(1)}%</td>
+                        <td className="px-3 py-3">{op.reviewStatus || "Unreviewed"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </>
+        )}
+
+        <TeamGroupSummary />
+      </div>
+    </main>
+  );
+}

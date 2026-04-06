@@ -1,0 +1,149 @@
+{
+  "date": "2026-04-03",
+  "operators": {
+    "rfajg": {
+      "assignedRole": "FrzPut",
+      "assignedArea": "Freezer",
+      "reviewNotes": "Updated through UI test",
+      "reviewStatus": "reviewed",
+      "auditOverrides": {
+        "area_mismatch": "dismissed"
+      }
+    },
+    "rfrar": {
+      "assignedRole": "ClrRcv",
+      "assignedArea": "Receiving",
+      "reviewNotes": "Reviewed by Anthony",
+      "reviewStatus": "reviewed",
+      "auditOverrides": {},
+      "performanceOverrides": {
+        "excludeFromLeaderboard": true,
+        "excludeReason": "Receiving only",
+        "forceArea": ""
+      }
+    },
+    "kmakela": {
+      "assignedRole": "Extra",
+      "assignedArea": "Inventory",
+      "reviewNotes": "",
+      "reviewStatus": "reviewed",
+      "auditOverrides": {},
+      "performanceOverrides": {
+        "excludeFromLeaderboard": true,
+        "excludeReason": "Inventory employee",
+        "forceArea": "Inventory"
+      }
+    },
+    "rflrb": {
+      "assignedRole": "FrzRcv",
+      "assignedArea": "Receiving",
+      "reviewNotes": "Reviewed by Anthony",
+      "reviewStatus": "reviewed",
+      "auditOverrides": {},
+      "performanceOverrides": {
+        "excludeFromLeaderboard": true,
+        "excludeReason": "Receiving only"
+      }
+    },
+    "rfsmf": {
+      "assignedRole": "DryRcv",
+      "assignedArea": "Receiving",
+      "reviewNotes": "Reviewed by Anthony ",
+      "reviewStatus": "reviewed",
+      "auditOverrides": {},
+      "performanceOverrides": {
+        "excludeFromLeaderboard": true,
+        "excludeReason": "Receiving only",
+        "forceArea": "Receiving"
+      }
+    },
+    "rfjll": {
+      "assignedRole": "Extra",
+      "assignedArea": "Produce Cooler",
+      "reviewNotes": "",
+      "reviewStatus": "reviewed",
+      "auditOverrides": {},
+      "performanceOverrides": {
+        "excludeFromLeaderboard": true,
+        "excludeReason": "Extra",
+        "forceArea": "Receiving"
+      }
+    },
+    "rfdjm": {
+      "assignedRole": "NSDrp",
+      "assignedArea": "Night Shift",
+      "reviewNotes": "Applied role",
+      "reviewStatus": "reviewed",
+      "auditOverrides": {},
+      "performanceOverrides": {
+        "excludeFromLeaderboard": true,
+        "excludeReason": "Night shift",
+        "forceArea": ""
+      }
+    },
+    "rfpjp": {
+      "assignedArea": "Freezer",
+      "auditOverrides": {},
+      "performanceOverrides": {},
+      "assignedRole": "DryPIR",
+      "reviewNotes": "",
+      "reviewStatus": "reviewed"
+    },
+    "rfdel": {
+      "assignedRole": "ClrMeat",
+      "assignedArea": "Cooler",
+      "reviewNotes": "",
+      "reviewStatus": "reviewed",
+      "auditOverrides": {},
+      "performanceOverrides": {}
+    },
+    "rfbjm": {
+      "assignedRole": "FrzLet",
+      "assignedArea": "Freezer",
+      "reviewNotes": "",
+      "reviewStatus": "reviewed",
+      "auditOverrides": {},
+      "performanceOverrides": {}
+    },
+    "rfcrs": {
+      "assignedRole": "DryMix",
+      "assignedArea": "Dry",
+      "reviewNotes": "",
+      "reviewStatus": "reviewed",
+      "auditOverrides": {},
+      "performanceOverrides": {}
+    },
+    "rfdsw": {
+      "assignedRole": "FrzPIR",
+      "assignedArea": "Freezer PIR",
+      "reviewNotes": "",
+      "reviewStatus": "reviewed",
+      "auditOverrides": {},
+      "performanceOverrides": {}
+    },
+    "rfrpc": {
+      "assignedRole": "FrzMix",
+      "assignedArea": "Freezer",
+      "reviewNotes": "",
+      "reviewStatus": "reviewed",
+      "auditOverrides": {},
+      "performanceOverrides": {}
+    },
+    "rfrem": {
+      "assignedRole": "ClrDairy",
+      "assignedArea": "Cooler",
+      "reviewNotes": "",
+      "reviewStatus": "reviewed",
+      "auditOverrides": {},
+      "performanceOverrides": {}
+    },
+    "rfsrb": {
+      "assignedRole": "DryFlr",
+      "assignedArea": "Dry",
+      "reviewNotes": "",
+      "reviewStatus": "reviewed",
+      "auditOverrides": {},
+      "performanceOverrides": {}
+    }
+  }
+}

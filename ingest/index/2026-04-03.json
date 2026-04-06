@@ -1,0 +1,58 @@
+{
+  "date": "2026-04-03",
+  "reports": {
+    "b_forkl2": {
+      "activeRun": "run-002",
+      "runs": [
+        {
+          "runId": "run-001",
+          "status": "superseded",
+          "checksum": "1a55c13c09724f932f3568ba9c828ec29630d10cc743499aa9be5ac417b6447b",
+          "size": 13525,
+          "sourcePath": "ingest/raw/b_forkl2.9565",
+          "ingestedAt": "2026-04-04T17:54:25+00:00",
+          "duplicateOf": null
+        },
+        {
+          "runId": "run-002",
+          "status": "active",
+          "checksum": "121e06252434d0a7048416c54bcd3f114c64f8d767b74704f6b5ead1ac8711b4",
+          "size": 13526,
+          "sourcePath": "ingest/raw/b_forkl2.9565.rev2",
+          "ingestedAt": "2026-04-04T18:35:21+00:00",
+          "duplicateOf": null
+        }
+      ]
+    },
+    "rf2_forkstdl": {
+      "activeRun": "run-001",
+      "runs": [
+        {
+          "runId": "run-001",
+          "status": "active",
+          "checksum": "19b3135b68fb11316e1b68630c50ed4e54cb490e40bcdd4c1b468b84dedc61f3",
+          "size": 6985,
+          "sourcePath": "ingest/raw/rf2_forkstdl.9566",
+          "ingestedAt": "2026-04-04T17:54:25+00:00",
+          "duplicateOf": null
+        }
+      ]
+    },
+    "rf2_userls": {
+      "activeRun": "run-001",
+      "runs": [
+        {
+          "runId": "run-001",
+          "status": "active",
+          "checksum": "8fdbb7ac43926f691da6d49fbd0a1f21f996c7ec1ee4ae496a67426ae667b936",
+          "size": 711439,
+          "sourcePath": "ingest/raw/rf2_userls.9567",
+          "ingestedAt": "2026-04-04T17:54:25+00:00",
+          "duplicateOf": null
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-04-04T17:54:25+00:00",
+  "updatedAt": "2026-04-04T18:35:21+00:00"
+}

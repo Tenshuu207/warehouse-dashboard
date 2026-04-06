@@ -1,0 +1,64 @@
+{
+  "operators": {
+    "rfajg": {
+      "name": "Aaron",
+      "defaultTeam": "Freezer"
+    },
+    "rfbjm": {
+      "name": "Bradley",
+      "defaultTeam": "Freezer"
+    },
+    "rfcrs": {
+      "name": "Chris",
+      "defaultTeam": "Dry"
+    },
+    "rfdsw": {
+      "name": "David",
+      "defaultTeam": "Freezer"
+    },
+    "rfdjm": {
+      "name": "David Malo",
+      "defaultTeam": "Night Shift"
+    },
+    "rfdel": {
+      "name": "Dwight",
+      "defaultTeam": "Cooler"
+    },
+    "rfjll": {
+      "name": "Jesse",
+      "defaultTeam": "Receiving"
+    },
+    "kmakela": {
+      "name": "Keith Makela",
+      "defaultTeam": "Inventory"
+    },
+    "rflrb": {
+      "name": "Lliam Breingan",
+      "defaultTeam": "Receiving"
+    },
+    "rfpjp": {
+      "name": "Phillip",
+      "defaultTeam": "Dry"
+    },
+    "rfrem": {
+      "name": "Reece",
+      "defaultTeam": "Cooler"
+    },
+    "rfsmf": {
+      "name": "rfsmf",
+      "defaultTeam": "Receiving"
+    },
+    "rfrpc": {
+      "name": "Ryan C.",
+      "defaultTeam": "Freezer"
+    },
+    "rfrar": {
+      "name": "Ryan Rowe (RF)",
+      "defaultTeam": "Receiving"
+    },
+    "rfsrb": {
+      "name": "Scott",
+      "defaultTeam": "Dry"
+    }
+  }
+}

@@ -1,0 +1,199 @@
+{
+  "items": [
+    {
+      "rfUsername": "kmakela",
+      "rawNamesSeen": [
+        "Keith Makela"
+      ],
+      "reason": "unmapped_rf_username",
+      "status": "resolved",
+      "firstSeenDate": "2026-04-03",
+      "lastSeenDate": "2026-04-03",
+      "id": "1775403346372_kmakela_unmapped_rf_username_t02z5l",
+      "employeeId": "EMP0001",
+      "employeeDisplayName": "Keith Makela"
+    },
+    {
+      "rfUsername": "rfajg",
+      "rawNamesSeen": [
+        "Aaron"
+      ],
+      "reason": "unmapped_rf_username",
+      "status": "resolved",
+      "firstSeenDate": "2026-04-03",
+      "lastSeenDate": "2026-04-03",
+      "id": "1775403346371_rfajg_unmapped_rf_username_mkd9ms",
+      "employeeId": "EMP0005",
+      "employeeDisplayName": "Aaron Gagne"
+    },
+    {
+      "rfUsername": "rfbjm",
+      "rawNamesSeen": [
+        "Bradley"
+      ],
+      "reason": "unmapped_rf_username",
+      "status": "resolved",
+      "firstSeenDate": "2026-04-03",
+      "lastSeenDate": "2026-04-03",
+      "id": "1775403346371_rfbjm_unmapped_rf_username_bf0cb7",
+      "employeeId": "EMP0002",
+      "employeeDisplayName": "Bradley Melanson"
+    },
+    {
+      "rfUsername": "rfcrs",
+      "rawNamesSeen": [
+        "Chris"
+      ],
+      "reason": "unmapped_rf_username",
+      "status": "resolved",
+      "firstSeenDate": "2026-04-03",
+      "lastSeenDate": "2026-04-03",
+      "id": "1775403346371_rfcrs_unmapped_rf_username_7akg9l",
+      "employeeId": "EMP0006",
+      "employeeDisplayName": "Chris Simmons"
+    },
+    {
+      "rfUsername": "rfdel",
+      "rawNamesSeen": [
+        "Dwight"
+      ],
+      "reason": "unmapped_rf_username",
+      "status": "resolved",
+      "firstSeenDate": "2026-04-03",
+      "lastSeenDate": "2026-04-03",
+      "id": "1775403346371_rfdel_unmapped_rf_username_haodto",
+      "employeeId": "EMP0007",
+      "employeeDisplayName": "Dwight Lingley"
+    },
+    {
+      "rfUsername": "rfdjm",
+      "rawNamesSeen": [
+        "David Malo"
+      ],
+      "reason": "unmapped_rf_username",
+      "status": "resolved",
+      "firstSeenDate": "2026-04-03",
+      "lastSeenDate": "2026-04-03",
+      "id": "1775403346372_rfdjm_unmapped_rf_username_vgv6zo",
+      "employeeId": "EMP0008",
+      "employeeDisplayName": "David Malo"
+    },
+    {
+      "rfUsername": "rfdsw",
+      "rawNamesSeen": [
+        "David"
+      ],
+      "reason": "unmapped_rf_username",
+      "status": "resolved",
+      "firstSeenDate": "2026-04-03",
+      "lastSeenDate": "2026-04-03",
+      "id": "1775403346371_rfdsw_unmapped_rf_username_d9mrd5",
+      "employeeId": "EMP0009",
+      "employeeDisplayName": "David Westerman"
+    },
+    {
+      "rfUsername": "rfjll",
+      "rawNamesSeen": [
+        "Jesse"
+      ],
+      "reason": "unmapped_rf_username",
+      "status": "resolved",
+      "firstSeenDate": "2026-04-03",
+      "lastSeenDate": "2026-04-03",
+      "id": "1775403346372_rfjll_unmapped_rf_username_6ah2nl",
+      "employeeId": "EMP0010",
+      "employeeDisplayName": "Jesse Lewin"
+    },
+    {
+      "rfUsername": "rflrb",
+      "rawNamesSeen": [
+        "Lliam Breingan"
+      ],
+      "reason": "unmapped_rf_username",
+      "status": "resolved",
+      "firstSeenDate": "2026-04-03",
+      "lastSeenDate": "2026-04-03",
+      "id": "1775403346371_rflrb_unmapped_rf_username_n54u5b",
+      "employeeId": "EMP0011",
+      "employeeDisplayName": "Lliam Breingan"
+    },
+    {
+      "rfUsername": "rfpjp",
+      "rawNamesSeen": [
+        "Phillip"
+      ],
+      "reason": "unmapped_rf_username",
+      "status": "resolved",
+      "firstSeenDate": "2026-04-03",
+      "lastSeenDate": "2026-04-03",
+      "id": "1775403346372_rfpjp_unmapped_rf_username_2grvv0",
+      "employeeId": "EMP0012",
+      "employeeDisplayName": "Philip Philyaw"
+    },
+    {
+      "rfUsername": "rfrar",
+      "rawNamesSeen": [
+        "Ryan Rowe (RF)"
+      ],
+      "reason": "unmapped_rf_username",
+      "status": "resolved",
+      "firstSeenDate": "2026-04-03",
+      "lastSeenDate": "2026-04-03",
+      "id": "1775403346370_rfrar_unmapped_rf_username_apr00y",
+      "employeeId": "EMP0013",
+      "employeeDisplayName": "Ryan Rowe"
+    },
+    {
+      "rfUsername": "rfrem",
+      "rawNamesSeen": [
+        "Reece"
+      ],
+      "reason": "unmapped_rf_username",
+      "status": "resolved",
+      "firstSeenDate": "2026-04-03",
+      "lastSeenDate": "2026-04-03",
+      "id": "1775403346371_rfrem_unmapped_rf_username_x84e0x",
+      "employeeId": "EMP0014",
+      "employeeDisplayName": "Reece Miller"
+    },
+    {
+      "rfUsername": "rfrpc",
+      "rawNamesSeen": [
+        "Ryan C."
+      ],
+      "reason": "unmapped_rf_username",
+      "status": "resolved",
+      "firstSeenDate": "2026-04-03",
+      "lastSeenDate": "2026-04-03",
+      "id": "1775403346371_rfrpc_unmapped_rf_username_mbuelx",
+      "employeeId": "EMP0015",
+      "employeeDisplayName": "Ryan Cormier"
+    },
+    {
+      "rfUsername": "rfsmf",
+      "rawNamesSeen": [
+        "rfsmf"
+      ],
+      "reason": "unmapped_rf_username",
+      "status": "resolved",
+      "firstSeenDate": "2026-04-03",
+      "lastSeenDate": "2026-04-03",
+      "id": "1775403346371_rfsmf_unmapped_rf_username_8iq54b",
+      "employeeId": "EMP0003",
+      "employeeDisplayName": "Shawn Finley"
+    },
+    {
+      "rfUsername": "rfsrb",
+      "rawNamesSeen": [
+        "Scott"
+      ],
+      "reason": "unmapped_rf_username",
+      "status": "resolved",
+      "firstSeenDate": "2026-04-03",
+      "lastSeenDate": "2026-04-03",
+      "id": "1775403346371_rfsrb_unmapped_rf_username_bkl3a7",
+      "employeeId": "EMP0016",
+      "employeeDisplayName": "Scott Bell"
+    }
+  ]
+}

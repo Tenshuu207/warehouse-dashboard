@@ -1,0 +1,15 @@
+{
+  "2026-04-03": {
+    "rfajg": { "name": "Aaron", "assignedRole": "FrzPut", "assignedArea": "Freezer" },
+    "rfbjm": { "name": "Bradley", "assignedRole": "FrzLet", "assignedArea": "Freezer" },
+    "rfjll": { "name": "Jesse", "assignedRole": "Extra", "assignedArea": "Freezer" },
+    "rfrpc": { "name": "Ryan C.", "assignedRole": "FrzMix", "assignedArea": "Freezer" },
+    "rfdsw": { "name": "David", "assignedRole": "FrzPIR", "assignedArea": "Freezer PIR" },
+    "rfcrs": { "name": "Chris", "assignedRole": "DryMix", "assignedArea": "Dry" },
+    "rfsrb": { "name": "Scott", "assignedRole": "DryFlr", "assignedArea": "Dry" },
+    "rfpjp": { "name": "Phillip", "assignedRole": "DryPIR", "assignedArea": "Dry PIR" },
+    "rfseh": { "name": "Shawn H.", "assignedRole": "Produce", "assignedArea": "Cooler" },
+    "rfdel": { "name": "Dwight", "assignedRole": "ClrMeat", "assignedArea": "Cooler" },
+    "rfrem": { "name": "Reece", "assignedRole": "ClrDairy", "assignedArea": "Cooler" }
+  }
+}

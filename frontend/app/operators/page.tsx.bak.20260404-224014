@@ -1,0 +1,378 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import DashboardNav from "@/components/dashboard-nav";
+import ControlBar from "@/components/control-bar";
+import { useAppState } from "@/lib/app-state";
+import { getWeekData, type ResolvedDashboardData } from "@/lib/data-resolver";
+
+type AuditFilter =
+  | "all"
+  | "flagged"
+  | "excluded"
+  | "reviewed"
+  | "pending"
+  | "unreviewed";
+
+function performanceColor(p: number): string {
+  if (p >= 110) return "text-green-600";
+  if (p >= 90) return "text-amber-600";
+  return "text-red-600";
+}
+
+function reviewStatusLabel(status: string | null | undefined): string {
+  switch (status) {
+    case "reviewed":
+      return "Reviewed";
+    case "pending":
+      return "Pending";
+    case "dismissed":
+      return "Dismissed";
+    default:
+      return "Unreviewed";
+  }
+}
+
+function reviewStatusClasses(status: string | null | undefined): string {
+  switch (status) {
+    case "reviewed":
+      return "bg-green-100 text-green-800 border-green-200";
+    case "pending":
+      return "bg-amber-100 text-amber-800 border-amber-200";
+    case "dismissed":
+      return "bg-slate-100 text-slate-700 border-slate-200";
+    default:
+      return "bg-slate-50 text-slate-500 border-slate-200";
+  }
+}
+
+function flagLabel(flag: string): string {
+  switch (flag) {
+    case "missing_manual_assignment":
+      return "Missing Assignment";
+    case "missing_area_mix":
+      return "Missing Area Mix";
+    case "area_mismatch":
+      return "Area Mismatch";
+    case "receiving_only":
+      return "Receiving Only";
+    case "performance_area_overridden":
+      return "Perf Area Override";
+    case "invalid_assigned_area":
+      return "Invalid Assigned Area";
+    case "invalid_assigned_role":
+      return "Invalid Assigned Role";
+    case "invalid_force_area":
+      return "Invalid Force Area";
+    default:
+      return flag;
+  }
+}
+
+function flagClasses(flag: string): string {
+  switch (flag) {
+    case "missing_manual_assignment":
+      return "bg-amber-100 text-amber-800 border-amber-200";
+    case "missing_area_mix":
+      return "bg-red-100 text-red-800 border-red-200";
+    case "area_mismatch":
+      return "bg-orange-100 text-orange-800 border-orange-200";
+    case "receiving_only":
+      return "bg-blue-100 text-blue-800 border-blue-200";
+    case "performance_area_overridden":
+      return "bg-purple-100 text-purple-800 border-purple-200";
+    default:
+      return "bg-slate-100 text-slate-700 border-slate-200";
+  }
+}
+
+export default function OperatorsPage() {
+  const { selectedWeek } = useAppState();
+  const [search, setSearch] = useState("");
+  const [auditFilter, setAuditFilter] = useState<AuditFilter>("all");
+  const [data, setData] = useState<ResolvedDashboardData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        setLoading(true);
+        setError(null);
+        const nextData = await getWeekData(selectedWeek);
+        if (!cancelled) setData(nextData);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Failed to load operators");
+          setData(null);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedWeek]);
+
+  const operators = data?.operators || [];
+
+  const filteredOperators = useMemo(() => {
+    return [...operators]
+      .filter((o) => {
+        const q = search.toLowerCase();
+
+        const matchesSearch =
+          o.name.toLowerCase().includes(q) ||
+          o.userid.toLowerCase().includes(q) ||
+          (o.assignedRole || "").toLowerCase().includes(q) ||
+          (o.assignedArea || "").toLowerCase().includes(q) ||
+          (o.effectivePerformanceArea || "").toLowerCase().includes(q) ||
+          (o.reviewStatus || "").toLowerCase().includes(q) ||
+          (o.reviewNotes || "").toLowerCase().includes(q) ||
+          (o.excludeReason || "").toLowerCase().includes(q) ||
+          o.auditFlags.some((flag) => flagLabel(flag).toLowerCase().includes(q));
+
+        if (!matchesSearch) return false;
+
+        switch (auditFilter) {
+          case "flagged":
+            return o.auditFlags.length > 0;
+          case "excluded":
+            return !!o.excludedFromLeaderboard;
+          case "reviewed":
+            return o.reviewStatus === "reviewed";
+          case "pending":
+            return o.reviewStatus === "pending";
+          case "unreviewed":
+            return !o.reviewStatus;
+          default:
+            return true;
+        }
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [operators, search, auditFilter]);
+
+  const stats = useMemo(() => {
+    return {
+      total: operators.length,
+      flagged: operators.filter((o) => o.auditFlags.length > 0).length,
+      excluded: operators.filter((o) => o.excludedFromLeaderboard).length,
+      reviewed: operators.filter((o) => o.reviewStatus === "reviewed").length,
+    };
+  }, [operators]);
+
+  return (
+    <main className="min-h-screen bg-slate-100 text-slate-900 p-3 md:p-4">
+      <div className="mx-auto max-w-7xl space-y-4 min-w-0">
+        <DashboardNav />
+        <ControlBar />
+
+        <section className="rounded-2xl bg-white border shadow-sm p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold">Operators</h2>
+              <p className="mt-1 text-xs text-slate-600">
+                Compact alphabetical roster. Tap a name for full detail.
+              </p>
+            </div>
+
+            <div className="text-right text-xs text-slate-500">
+              <div>{new Date(selectedWeek + "T00:00:00").toLocaleDateString()}</div>
+              <div className="mt-1">Showing {filteredOperators.length} of {stats.total}</div>
+            </div>
+          </div>
+        </section>
+
+        {loading && (
+          <section className="rounded-2xl bg-white border shadow-sm p-4 text-sm text-slate-600">
+            Loading operators...
+          </section>
+        )}
+
+        {error && (
+          <section className="rounded-2xl bg-white border shadow-sm p-4 text-sm text-red-600">
+            {error}
+          </section>
+        )}
+
+        {!loading && !error && (
+          <>
+            <section className="rounded-2xl bg-white border shadow-sm p-4 space-y-3">
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search operator, userid, role, area, note, or flag"
+                className="w-full rounded-xl border px-3 py-2"
+              />
+
+              <div className="flex flex-wrap gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setAuditFilter("all")}
+                  className={`rounded-full border px-3 py-1 ${auditFilter === "all" ? "bg-slate-900 text-white border-slate-900" : "bg-slate-50 text-slate-700 border-slate-200"}`}
+                >
+                  All: {stats.total}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAuditFilter("flagged")}
+                  className={`rounded-full border px-3 py-1 ${auditFilter === "flagged" ? "bg-slate-900 text-white border-slate-900" : "bg-amber-50 text-amber-800 border-amber-200"}`}
+                >
+                  Flagged: {stats.flagged}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAuditFilter("excluded")}
+                  className={`rounded-full border px-3 py-1 ${auditFilter === "excluded" ? "bg-slate-900 text-white border-slate-900" : "bg-purple-50 text-purple-800 border-purple-200"}`}
+                >
+                  Excluded: {stats.excluded}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAuditFilter("reviewed")}
+                  className={`rounded-full border px-3 py-1 ${auditFilter === "reviewed" ? "bg-slate-900 text-white border-slate-900" : "bg-green-50 text-green-800 border-green-200"}`}
+                >
+                  Reviewed: {stats.reviewed}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAuditFilter("pending")}
+                  className={`rounded-full border px-3 py-1 ${auditFilter === "pending" ? "bg-slate-900 text-white border-slate-900" : "bg-amber-50 text-amber-800 border-amber-200"}`}
+                >
+                  Pending
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAuditFilter("unreviewed")}
+                  className={`rounded-full border px-3 py-1 ${auditFilter === "unreviewed" ? "bg-slate-900 text-white border-slate-900" : "bg-slate-50 text-slate-700 border-slate-200"}`}
+                >
+                  Unreviewed
+                </button>
+              </div>
+            </section>
+
+            <section className="rounded-2xl bg-white border shadow-sm overflow-x-auto">
+              <div className="min-w-[820px]">
+                <div className="grid grid-cols-12 gap-3 px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500 border-b bg-slate-50">
+                  <div className="col-span-3">Operator</div>
+                  <div className="col-span-2">Assignment</div>
+                  <div className="col-span-2">Review</div>
+                  <div className="col-span-2">Performance</div>
+                  <div className="col-span-2">Volume</div>
+                  <div className="col-span-1">Flags</div>
+                </div>
+
+                {filteredOperators.map((o) => (
+                  <div key={o.userid} className="grid grid-cols-12 gap-3 px-4 py-3 border-b last:border-b-0 items-start text-sm">
+                    <div className="col-span-3 min-w-0">
+                      <div className="font-semibold break-words">
+                        <Link href={`/operators/${o.userid}`} className="hover:underline">
+                          {o.name}
+                        </Link>
+                      </div>
+                      <div className="text-xs text-slate-500 mt-1">{o.userid}</div>
+                      {o.reviewNotes && (
+                        <div className="text-xs text-slate-500 mt-2 line-clamp-2">
+                          {o.reviewNotes}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="col-span-2 min-w-0">
+                      <div className="text-xs text-slate-500">Area</div>
+                      <div className="font-medium break-words">{o.assignedArea || "Unassigned"}</div>
+                      <div className="text-xs text-slate-500 mt-2">Role</div>
+                      <div className="break-words">{o.assignedRole || "Unassigned"}</div>
+                    </div>
+
+                    <div className="col-span-2 min-w-0">
+                      <div className="flex flex-wrap gap-1.5">
+                        <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${reviewStatusClasses(o.reviewStatus)}`}>
+                          {reviewStatusLabel(o.reviewStatus)}
+                        </span>
+                        {o.excludedFromLeaderboard && (
+                          <span className="rounded-full border px-2 py-0.5 text-[11px] font-medium bg-purple-100 text-purple-800 border-purple-200">
+                            Excluded
+                          </span>
+                        )}
+                      </div>
+
+                      {(o.effectivePerformanceArea || o.rawDominantArea) && (
+                        <div className="mt-2 text-xs text-slate-500">
+                          Perf area: {o.effectivePerformanceArea || o.rawDominantArea}
+                        </div>
+                      )}
+
+                      {o.excludedFromLeaderboard && o.excludeReason && (
+                        <div className="mt-2 text-xs text-purple-700 break-words">
+                          {o.excludeReason}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="col-span-2 min-w-0">
+                      <div className={`text-lg font-semibold ${performanceColor(o.performanceVsStandard || 0)}`}>
+                        {(o.performanceVsStandard || 0).toFixed(1)}%
+                      </div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        {(o.actualMinutes || 0).toFixed(0)} actual min
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {(o.standardMinutes || 0).toFixed(0)} standard min
+                      </div>
+                    </div>
+
+                    <div className="col-span-2 min-w-0">
+                      <div className="font-medium">{(o.totalPlates || 0).toLocaleString()} plates</div>
+                      <div className="font-medium">{(o.totalPieces || 0).toLocaleString()} pieces</div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        Avg {(o.avg || 0).toFixed(2)} / plate
+                      </div>
+                      {(o.receivingPieces || 0) > 0 && (
+                        <div className="text-xs text-slate-500">
+                          Receiving {(o.receivingPieces || 0).toLocaleString()}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="col-span-1 min-w-0">
+                      <div className="flex flex-wrap gap-1">
+                        {o.auditFlags.length === 0 && (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
+                        {o.auditFlags.slice(0, 3).map((flag) => (
+                          <span
+                            key={`${o.userid}-${flag}`}
+                            className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${flagClasses(flag)}`}
+                            title={flagLabel(flag)}
+                          >
+                            {flagLabel(flag)}
+                          </span>
+                        ))}
+                        {o.auditFlags.length > 3 && (
+                          <span className="rounded-full border px-2 py-0.5 text-[10px] font-medium bg-slate-100 text-slate-700 border-slate-200">
+                            +{o.auditFlags.length - 3}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+                {filteredOperators.length === 0 && (
+                  <div className="px-4 py-8 text-sm text-slate-500">No matching operators.</div>
+                )}
+              </div>
+            </section>
+          </>
+        )}
+      </div>
+    </main>
+  );
+}
