@@ -4,6 +4,12 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/lib/app-state";
 import { getWeekData, type ResolvedDashboardData } from "@/lib/data-resolver";
+import {
+  resolveOperatorIdentity,
+  type EmployeeRecord,
+  type OperatorDefault,
+  type RfMapping,
+} from "@/lib/employee-identity";
 
 function fmt(value: number | null | undefined, digits = 0) {
   return Number(value || 0).toLocaleString("en-US", {
@@ -41,6 +47,36 @@ function cleanDisplayName(op: Record<string, unknown>) {
   );
 
   return human || candidates.find((value) => value !== "Unknown") || "Unknown";
+}
+
+function resolvedSheetName(
+  op: Record<string, unknown>,
+  selectedWeek: string,
+  employees: Record<string, EmployeeRecord>,
+  mappings: RfMapping[],
+  defaults: Record<string, OperatorDefault>
+) {
+  const resolved = resolveOperatorIdentity({
+    rfUsername: String(op.userid || ""),
+    fallbackName: cleanDisplayName(op),
+    fallbackTeam: String(
+      op.rawAssignedArea ||
+        op.effectiveAssignedArea ||
+        op.assignedArea ||
+        op.area ||
+        ""
+    ),
+    selectedDate: selectedWeek,
+    employees,
+    mappings,
+    defaultTeams: defaults,
+  });
+
+  const display = String(resolved.displayName || "")
+    .replace(/\s*\(RF\)\s*$/i, "")
+    .trim();
+
+  return display || cleanDisplayName(op);
 }
 
 type Row = {
@@ -112,6 +148,9 @@ function TopListBox({
 export default function WeeklySheetView() {
   const { selectedWeek } = useAppState();
   const [data, setData] = useState<ResolvedDashboardData | null>(null);
+  const [defaults, setDefaults] = useState<Record<string, OperatorDefault>>({});
+  const [employees, setEmployees] = useState<Record<string, EmployeeRecord>>({});
+  const [mappings, setMappings] = useState<RfMapping[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -122,9 +161,23 @@ export default function WeeklySheetView() {
       try {
         setLoading(true);
         setError(null);
-        const next = await getWeekData(selectedWeek);
+
+        const [next, defaultsRes, employeesRes, mappingsRes] = await Promise.all([
+          getWeekData(selectedWeek),
+          fetch("/api/operator-defaults", { cache: "no-store" }),
+          fetch("/api/employees", { cache: "no-store" }),
+          fetch("/api/rf-mappings", { cache: "no-store" }),
+        ]);
+
+        const defaultsJson = defaultsRes.ok ? await defaultsRes.json() : { operators: {} };
+        const employeesJson = employeesRes.ok ? await employeesRes.json() : { employees: {} };
+        const mappingsJson = mappingsRes.ok ? await mappingsRes.json() : { mappings: [] };
+
         if (!cancelled) {
           setData(next);
+          setDefaults(defaultsJson.operators || {});
+          setEmployees(employeesJson.employees || {});
+          setMappings(Array.isArray(mappingsJson.mappings) ? mappingsJson.mappings : []);
           setLoading(false);
         }
       } catch (err) {
@@ -161,7 +214,7 @@ export default function WeeklySheetView() {
 
         return {
           userid: String(op.userid || ""),
-          name: cleanDisplayName(op),
+          name: resolvedSheetName(op, selectedWeek, employees, mappings, defaults),
           role: String(
             op.effectiveAssignedRole ||
               op.currentRole ||
@@ -190,7 +243,7 @@ export default function WeeklySheetView() {
       })
       .filter((row) => row.totalPlates > 0 || row.receivingPlates > 0)
       .sort((a, b) => b.totalPieces - a.totalPieces);
-  }, [data]);
+  }, [data, selectedWeek, employees, mappings, defaults]);
 
   const totals = useMemo(() => {
     return rows.reduce(
