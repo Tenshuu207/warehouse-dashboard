@@ -486,15 +486,17 @@ export default function AssignmentReviewPage() {
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="text-base font-bold text-slate-900">
-                          {row.observedName || row.resolvedName}
+                          {row.employeeDisplayName || row.resolvedName || row.observedName || row.userid}
                         </div>
                         <div className="mt-1 text-xs text-slate-500">
                           {row.userid}
                           {row.employeeId ? ` · ${row.employeeId}` : ""}
                         </div>
-                        {row.employeeDisplayName && row.employeeDisplayName !== (row.observedName || row.resolvedName) ? (
+                        {row.observedName &&
+                        row.employeeDisplayName &&
+                        row.observedName !== row.employeeDisplayName ? (
                           <div className="mt-1 text-sm text-slate-600">
-                            Linked employee: {row.employeeDisplayName}
+                            Observed as: {row.observedName}
                           </div>
                         ) : null}
                       </div>
