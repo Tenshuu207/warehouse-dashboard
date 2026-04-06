@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/lib/app-state";
+import PageHeader from "./shared/PageHeader";
+import StatCard from "./shared/StatCard";
 
 type TeamGroupsResponse = {
   date: string;
