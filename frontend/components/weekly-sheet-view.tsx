@@ -21,6 +21,28 @@ function avgPcsPerPlate(pieces: number, plates: number) {
   return pieces / plates;
 }
 
+function cleanDisplayName(op: Record<string, unknown>) {
+  const candidates = [
+    op.employeeDisplayName,
+    op.resolvedEmployeeName,
+    op.employeeName,
+    op.linkedEmployeeName,
+    op.displayName,
+    op.resolvedName,
+    op.name,
+    op.userid,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .map((value) => value.replace(/\s*\(RF\)\s*$/i, "").trim());
+
+  const human = candidates.find(
+    (value) => value && !/^rf[a-z0-9]+$/i.test(value) && value !== "Unknown"
+  );
+
+  return human || candidates.find((value) => value !== "Unknown") || "Unknown";
+}
+
 type Row = {
   userid: string;
   name: string;
@@ -139,14 +161,7 @@ export default function WeeklySheetView() {
 
         return {
           userid: String(op.userid || ""),
-          name: String(
-            op.employeeDisplayName ||
-              op.resolvedEmployeeName ||
-              op.resolvedName ||
-              op.name ||
-              op.userid ||
-              "Unknown"
-          ),
+          name: cleanDisplayName(op),
           role: String(
             op.effectiveAssignedRole ||
               op.currentRole ||
@@ -461,6 +476,13 @@ export default function WeeklySheetView() {
                     Week Total
                   </div>
                   <table className="w-full text-sm">
+                    <thead className="bg-slate-100 text-slate-900">
+                      <tr>
+                        <th className="border border-slate-900 px-3 py-1.5 text-left">Type</th>
+                        <th className="border border-slate-900 px-3 py-1.5 text-right">Plates</th>
+                        <th className="border border-slate-900 px-3 py-1.5 text-right">Pieces</th>
+                      </tr>
+                    </thead>
                     <tbody>
                       <tr>
                         <td className="border border-slate-900 px-3 py-1.5 font-medium">Letdowns</td>
@@ -497,6 +519,13 @@ export default function WeeklySheetView() {
 
             <SummaryBox title="Receiving Total">
               <table className="w-full text-sm">
+                <thead className="bg-slate-100 text-slate-900">
+                  <tr>
+                    <th className="border border-slate-900 px-3 py-1.5 text-left">Employee</th>
+                    <th className="border border-slate-900 px-3 py-1.5 text-right">Plates</th>
+                    <th className="border border-slate-900 px-3 py-1.5 text-right">Pieces</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {topReceiving.map((row) => (
                     <tr key={`recv-${row.userid}`}>
