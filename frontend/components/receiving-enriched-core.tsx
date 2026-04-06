@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/lib/app-state";
+import PageHeader from "./shared/PageHeader";
+import StatCard from "./shared/StatCard";
 
 type AreaBucket = {
   areaCode?: string | null;
@@ -204,34 +206,17 @@ export default function ReceivingEnrichedCore() {
 
   return (
     <section className="rounded-2xl bg-white border shadow-sm p-4 space-y-4">
-      <div>
-        <h3 className="text-lg font-bold">Receiving Core (Enriched)</h3>
-        <p className="mt-1 text-sm text-slate-500">
-          Main receiving view from enriched daily data. Destination areas come from UserLS area inference.
-        </p>
-      </div>
+      <PageHeader
+        title="Receiving Core (Enriched)"
+        subtitle="Main receiving view from enriched daily data. Destination areas come from UserLS area inference."
+      />
 
       <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
-        <div className="rounded-xl border bg-slate-50 p-3 text-center">
-          <div className="text-[11px] text-slate-500">Receivers</div>
-          <div className="mt-2 text-2xl font-semibold">{totals.receivers}</div>
-        </div>
-        <div className="rounded-xl border bg-slate-50 p-3 text-center">
-          <div className="text-[11px] text-slate-500">Receiving Plates</div>
-          <div className="mt-2 text-2xl font-semibold">{fmt(totals.recvPlates)}</div>
-        </div>
-        <div className="rounded-xl border bg-slate-50 p-3 text-center">
-          <div className="text-[11px] text-slate-500">Receiving Pieces</div>
-          <div className="mt-2 text-2xl font-semibold">{fmt(totals.recvPieces)}</div>
-        </div>
-        <div className="rounded-xl border bg-slate-50 p-3 text-center">
-          <div className="text-[11px] text-slate-500">Repl Touch Plates</div>
-          <div className="mt-2 text-2xl font-semibold">{fmt(totals.replPlates)}</div>
-        </div>
-        <div className="rounded-xl border bg-slate-50 p-3 text-center">
-          <div className="text-[11px] text-slate-500">Repl Touch Pieces</div>
-          <div className="mt-2 text-2xl font-semibold">{fmt(totals.replPieces)}</div>
-        </div>
+        <StatCard label="Receivers">{totals.receivers}</StatCard>
+        <StatCard label="Receiving Plates">{fmt(totals.recvPlates)}</StatCard>
+        <StatCard label="Receiving Pieces">{fmt(totals.recvPieces)}</StatCard>
+        <StatCard label="Repl Touch Plates">{fmt(totals.replPlates)}</StatCard>
+        <StatCard label="Repl Touch Pieces">{fmt(totals.replPieces)}</StatCard>
       </div>
 
       <div>
