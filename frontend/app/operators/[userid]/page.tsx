@@ -6,6 +6,11 @@ import { useParams } from "next/navigation";
 import DashboardNav from "@/components/dashboard-nav";
 import OperatorUserlsTracking from "@/components/operator-userls-tracking";
 import ControlBar from "@/components/control-bar";
+import PageHeader from "@/components/shared/PageHeader";
+import StatCard from "@/components/shared/StatCard";
+import ContextBadge from "@/components/shared/ContextBadge";
+import SectionBlock from "@/components/shared/SectionBlock";
+import DetailDisclosure from "@/components/shared/DetailDisclosure";
 import { useAppState } from "@/lib/app-state";
 import { getWeekData, type ResolvedDashboardData } from "@/lib/data-resolver";
 import {
@@ -34,16 +39,16 @@ function reviewStatusLabel(status: string | null | undefined): string {
   }
 }
 
-function reviewStatusClasses(status: string | null | undefined): string {
+function reviewStatusVariant(
+  status: string | null | undefined
+): "review-status" | "neutral" {
   switch (status) {
     case "reviewed":
-      return "bg-green-100 text-green-800 border-green-200";
     case "pending":
-      return "bg-amber-100 text-amber-800 border-amber-200";
     case "dismissed":
-      return "bg-slate-100 text-slate-700 border-slate-200";
+      return "review-status";
     default:
-      return "bg-slate-50 text-slate-500 border-slate-200";
+      return "neutral";
   }
 }
 
@@ -78,21 +83,24 @@ function flagLabel(flag: string): string {
   }
 }
 
-function flagClasses(flag: string): string {
+function flagTone(flag: string): "context" | "review-status" | "neutral" {
   switch (flag) {
     case "missing_raw_manual_assignment":
     case "missing_manual_assignment":
-      return "bg-amber-100 text-amber-800 border-amber-200";
     case "missing_area_mix":
-      return "bg-red-100 text-red-800 border-red-200";
+    case "invalid_raw_assigned_area":
+    case "invalid_assigned_area":
+    case "invalid_raw_assigned_role":
+    case "invalid_assigned_role":
+    case "invalid_force_area":
+      return "review-status";
     case "assigned_area_overridden":
     case "assigned_role_overridden":
     case "performance_area_overridden":
-      return "bg-purple-100 text-purple-800 border-purple-200";
     case "excluded_from_leaderboard":
-      return "bg-blue-100 text-blue-800 border-blue-200";
+      return "context";
     default:
-      return "bg-slate-100 text-slate-700 border-slate-200";
+      return "neutral";
   }
 }
 
@@ -124,24 +132,12 @@ function SeenList({
   );
 }
 
-function StatCell({
-  label,
-  value,
-  subtext,
-  valueClassName = "",
-}: {
-  label: string;
-  value: string;
-  subtext?: string;
-  valueClassName?: string;
-}) {
-  return (
-    <div className="rounded-xl border bg-white p-4 text-center">
-      <div className="text-[11px] text-slate-500">{label}</div>
-      <div className={`mt-2 text-2xl font-semibold ${valueClassName}`}>{value}</div>
-      {subtext ? <div className="mt-1 text-[11px] text-slate-500">{subtext}</div> : null}
-    </div>
-  );
+function fmt(value: number | null | undefined, digits = 0): string {
+  if (value === null || value === undefined) return "—";
+  return Number(value).toLocaleString("en-US", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
 }
 
 export default function OperatorDetailPage() {
@@ -163,6 +159,7 @@ export default function OperatorDetailPage() {
       try {
         setLoading(true);
         setError(null);
+
         const [nextData, defaultsRes, employeesRes, mappingsRes] = await Promise.all([
           getWeekData(selectedWeek),
           fetch("/api/operator-defaults", { cache: "no-store" }),
@@ -198,13 +195,18 @@ export default function OperatorDetailPage() {
 
   const operator = useMemo(() => {
     if (!data || !userid) return null;
+
     const base = (data.operators || []).find((o) => o.userid === userid) || null;
     if (!base) return null;
 
     const resolved = resolveOperatorIdentity({
       rfUsername: base.userid,
       fallbackName: base.name,
-      fallbackTeam: base.rawAssignedArea || base.effectiveAssignedArea || base.assignedArea || base.area,
+      fallbackTeam:
+        base.rawAssignedArea ||
+        base.effectiveAssignedArea ||
+        base.assignedArea ||
+        base.area,
       selectedDate: selectedWeek,
       employees,
       mappings,
@@ -228,228 +230,194 @@ export default function OperatorDetailPage() {
         <DashboardNav />
         <ControlBar />
 
-        <section className="rounded-2xl bg-white border shadow-sm p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-xs text-slate-500 mb-2">
-                <Link href="/operators" className="hover:underline">
-                  ← Back to Operators
-                </Link>
-              </div>
-              <h2 className="text-xl font-bold">Operator Detail</h2>
-              <p className="mt-1 text-xs text-slate-600">
-                Replenishment first, assignment and review context below it.
-              </p>
-            </div>
-
-            <div className="text-xs text-slate-500">{selectedWeek}</div>
+        <SectionBlock
+          title=""
+          right={<div className="text-right text-xs text-slate-500">{selectedWeek}</div>}
+        >
+          <div className="text-xs text-slate-500">
+            <Link href="/operators" className="hover:underline">
+              ← Back to Operators
+            </Link>
           </div>
-        </section>
+
+          <PageHeader
+            title="Operator Detail"
+            subtitle="Replenishment first, assignment and review context below it."
+          />
+        </SectionBlock>
 
         {loading && (
-          <section className="rounded-2xl bg-white border shadow-sm p-4 text-sm text-slate-600">
-            Loading operator detail...
-          </section>
+          <SectionBlock title="Operator Detail">
+            <div className="text-sm text-slate-600">Loading operator detail...</div>
+          </SectionBlock>
         )}
 
         {error && (
-          <section className="rounded-2xl bg-white border shadow-sm p-4 text-sm text-red-600">
-            {error}
-          </section>
+          <SectionBlock title="Operator Detail">
+            <div className="text-sm text-red-600">{error}</div>
+          </SectionBlock>
         )}
 
         {!loading && !error && !operator && (
-          <section className="rounded-2xl bg-white border shadow-sm p-4 text-sm text-slate-600">
-            Operator not found for userid: {userid}
-          </section>
+          <SectionBlock title="Operator Detail">
+            <div className="text-sm text-slate-600">
+              Operator not found for userid: {userid}
+            </div>
+          </SectionBlock>
         )}
 
         {!loading && !error && operator && (
           <>
-            <section className="rounded-2xl bg-white border shadow-sm p-4">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="space-y-2">
-                  <div>
-                    <div className="text-2xl font-semibold">{operator.resolvedName}</div>
-                    <div className="mt-1 text-sm text-slate-500">{operator.userid}</div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${reviewStatusClasses(operator.reviewStatus)}`}>
-                      {reviewStatusLabel(operator.reviewStatus)}
-                    </span>
-
-                    {operator.excludedFromLeaderboard && (
-                      <span className="rounded-full border px-2.5 py-1 text-xs font-medium bg-purple-100 text-purple-800 border-purple-200">
-                        Excluded
-                      </span>
-                    )}
-
-                    {operator.auditFlags.map((flag) => (
-                      <span
-                        key={flag}
-                        className={`rounded-full border px-2.5 py-1 text-xs font-medium ${flagClasses(flag)}`}
-                      >
-                        {flagLabel(flag)}
-                      </span>
-                    ))}
-                  </div>
-
-                  <div className="text-sm">
-                    <span className="text-slate-500">Effective:</span>{" "}
-                    <span className="font-semibold">
-                      {operator.effectiveAssignedArea || "Unassigned"} · {operator.effectiveAssignedRole || "Unassigned"}
-                    </span>
-                  </div>
-
-                  <div className="text-xs text-slate-500">
-                    Performance area: {operator.effectivePerformanceArea || operator.rawDominantArea || "None"}
-                  </div>
-                </div>
-
+            <SectionBlock
+              title={operator.resolvedName}
+              subtitle={operator.userid}
+              right={
                 <div className="text-right">
                   <div className="text-xs text-slate-500">Performance</div>
-                  <div className={`text-3xl font-semibold ${performanceColor(operator.performanceVsStandard || 0)}`}>
+                  <div
+                    className={`text-3xl font-semibold ${performanceColor(
+                      operator.performanceVsStandard || 0
+                    )}`}
+                  >
                     {(operator.performanceVsStandard || 0).toFixed(1)}%
                   </div>
                   <div className="mt-1 text-xs text-slate-500">
-                    {operator.actualMinutes.toFixed(0)} actual min · {operator.standardMinutes.toFixed(0)} standard min
+                    {operator.actualMinutes.toFixed(0)} actual min ·{" "}
+                    {operator.standardMinutes.toFixed(0)} standard min
                   </div>
                 </div>
+              }
+            >
+              <div className="flex flex-wrap gap-2">
+                <ContextBadge variant={reviewStatusVariant(operator.reviewStatus)}>
+                  Status: {reviewStatusLabel(operator.reviewStatus)}
+                </ContextBadge>
+
+                <ContextBadge variant="home-team">
+                  Effective Area: {operator.effectiveAssignedArea || "Unassigned"}
+                </ContextBadge>
+
+                <ContextBadge variant="observed-role">
+                  Effective Role: {operator.effectiveAssignedRole || "Unassigned"}
+                </ContextBadge>
+
+                <ContextBadge variant="context">
+                  Performance Area:{" "}
+                  {operator.effectivePerformanceArea || operator.rawDominantArea || "None"}
+                </ContextBadge>
+
+                {operator.excludedFromLeaderboard && (
+                  <ContextBadge variant="context">Excluded</ContextBadge>
+                )}
+
+                {operator.auditFlags.map((flag) => (
+                  <ContextBadge key={flag} variant={flagTone(flag)}>
+                    {flagLabel(flag)}
+                  </ContextBadge>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
+                <StatCard label="Repl Plates">{fmt(operator.replenishmentPlates)}</StatCard>
+                <StatCard label="Repl Pieces">{fmt(operator.replenishmentPieces)}</StatCard>
+                <StatCard label="Repl PCs/Plate">
+                  {fmt(operator.replenishmentPcsPerPlate, 2)}
+                </StatCard>
+                <StatCard label="Receiving Plates">{fmt(operator.receivingPlates)}</StatCard>
+                <StatCard label="Receiving Pieces">{fmt(operator.receivingPieces)}</StatCard>
+              </div>
+
+              <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+                <StatCard label="Putaway Plates">{fmt(operator.putawayPlates)}</StatCard>
+                <StatCard label="Letdown Plates">{fmt(operator.letdownPlates)}</StatCard>
+                <StatCard label="Restock Plates">{fmt(operator.restockPlates)}</StatCard>
+                <StatCard label="Days Reviewed">{fmt(operator.daysReviewed)}</StatCard>
               </div>
 
               {operator.reviewNotes && (
-                <div className="mt-4 rounded-xl border bg-slate-50 p-3">
-                  <div className="text-xs font-medium text-slate-500 mb-1">Review Notes</div>
+                <div className="rounded-xl border bg-slate-50 p-3">
+                  <div className="mb-1 text-xs font-medium text-slate-500">Review Notes</div>
                   <div className="text-sm text-slate-700">{operator.reviewNotes}</div>
                 </div>
               )}
 
               {operator.excludedFromLeaderboard && (
-                <div className="mt-3 rounded-xl border border-purple-200 bg-purple-50 p-3">
-                  <div className="text-xs font-medium text-purple-700 mb-1">Leaderboard Exclusion</div>
+                <div className="rounded-xl border border-purple-200 bg-purple-50 p-3">
+                  <div className="mb-1 text-xs font-medium text-purple-700">
+                    Leaderboard Exclusion
+                  </div>
                   <div className="text-sm text-purple-800">
                     {operator.excludeReason || "Excluded from leaderboard"}
                   </div>
                 </div>
               )}
-            </section>
+            </SectionBlock>
 
-            <section className="space-y-3">
-              <div className="grid grid-cols-3 gap-3">
-                <StatCell label="Replenishment Plates" value={operator.replenishmentPlates.toLocaleString()} />
-                <StatCell label="Replenishment Pieces" value={operator.replenishmentPieces.toLocaleString()} />
-                <StatCell label="Replenishment PCs/Plate" value={operator.replenishmentPcsPerPlate.toFixed(2)} />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <StatCell label="Receiving Plates" value={operator.receivingPlates.toLocaleString()} />
-                <StatCell label="Receiving Pieces" value={operator.receivingPieces.toLocaleString()} />
-              </div>
-            </section>
-
-            <section className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="rounded-2xl bg-white border shadow-sm p-4">
-                <h3 className="text-sm font-semibold">Putaway</h3>
-                <div className="mt-3 grid grid-cols-3 gap-3">
-                  <StatCell label="Plates" value={operator.putawayPlates.toLocaleString()} />
-                  <StatCell label="Pieces" value={operator.putawayPieces.toLocaleString()} />
-                  <StatCell label="PCs/Plate" value={operator.putawayPcsPerPlate.toFixed(2)} />
-                </div>
-              </div>
-
-              <div className="rounded-2xl bg-white border shadow-sm p-4">
-                <h3 className="text-sm font-semibold">Letdown</h3>
-                <div className="mt-3 grid grid-cols-3 gap-3">
-                  <StatCell label="Plates" value={operator.letdownPlates.toLocaleString()} />
-                  <StatCell label="Pieces" value={operator.letdownPieces.toLocaleString()} />
-                  <StatCell label="PCs/Plate" value={operator.letdownPcsPerPlate.toFixed(2)} />
-                </div>
-              </div>
-
-              <div className="rounded-2xl bg-white border shadow-sm p-4">
-                <h3 className="text-sm font-semibold">Restock</h3>
-                <div className="mt-3 grid grid-cols-3 gap-3">
-                  <StatCell label="Plates" value={operator.restockPlates.toLocaleString()} />
-                  <StatCell label="Pieces" value={operator.restockPieces.toLocaleString()} />
-                  <StatCell label="PCs/Plate" value={operator.restockPcsPerPlate.toFixed(2)} />
-                </div>
-              </div>
-            </section>
-
-            <section className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-              <div className="rounded-2xl bg-white border shadow-sm p-4">
-                <h3 className="text-sm font-semibold">Assignment</h3>
-
-                <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                  <div className="rounded-xl border bg-slate-50 px-3 py-2.5">
-                    <div className="text-xs text-slate-500">Effective Assignment</div>
-                    <div className="mt-1 text-center text-sm font-semibold">
-                      {operator.effectiveAssignedArea || "Unassigned"} · {operator.effectiveAssignedRole || "Unassigned"}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border bg-slate-50 px-3 py-2.5">
-                    <div className="text-xs text-slate-500">Performance Area</div>
-                    <div className="mt-1 text-center text-sm font-semibold">
+            <SectionBlock
+              title="Assignment and Review Summary"
+              subtitle="Current effective assignment, raw assignment, override context, and review activity."
+            >
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <StatCard label="Effective Assignment">
+                      {operator.effectiveAssignedArea || "Unassigned"} ·{" "}
+                      {operator.effectiveAssignedRole || "Unassigned"}
+                    </StatCard>
+                    <StatCard label="Performance Area">
                       {operator.effectivePerformanceArea || operator.rawDominantArea || "None"}
-                    </div>
+                    </StatCard>
+                    <StatCard label="Raw Assignment">
+                      {operator.rawAssignedArea || "None"} ·{" "}
+                      {operator.rawAssignedRole || "None"}
+                    </StatCard>
+                    <StatCard label="Overrides">
+                      {operator.reviewAssignedAreaOverride || "None"} ·{" "}
+                      {operator.reviewAssignedRoleOverride || "None"}
+                    </StatCard>
                   </div>
 
-                  <div className="rounded-xl border bg-slate-50 px-3 py-2.5">
-                    <div className="text-xs text-slate-500">Raw Assignment</div>
-                    <div className="mt-1 text-center text-sm font-semibold">
-                      {operator.rawAssignedArea || "None"} · {operator.rawAssignedRole || "None"}
+                  {rawDiffers && (
+                    <div className="rounded-xl border bg-slate-50 px-3 py-3 text-xs text-slate-600">
+                      Effective assignment differs from raw assignment this week.
                     </div>
-                  </div>
-
-                  <div className="rounded-xl border bg-slate-50 px-3 py-2.5">
-                    <div className="text-xs text-slate-500">Overrides</div>
-                    <div className="mt-1 text-center text-sm font-semibold">
-                      {operator.reviewAssignedAreaOverride || "None"} · {operator.reviewAssignedRoleOverride || "None"}
-                    </div>
-                  </div>
+                  )}
                 </div>
 
-                {rawDiffers && (
-                  <div className="mt-3 text-xs text-slate-500">
-                    Effective assignment differs from raw assignment this week.
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <StatCard label="Source Dates">{String(operator.sourceDates.length)}</StatCard>
+                    <StatCard label="Days Reviewed">{String(operator.daysReviewed)}</StatCard>
+                    <StatCard label="Days With Status">
+                      {String(operator.daysWithReviewStatus)}
+                    </StatCard>
+                    <StatCard label="Days With Notes">{String(operator.daysWithNotes)}</StatCard>
                   </div>
-                )}
-              </div>
 
-              <div className="rounded-2xl bg-white border shadow-sm p-4">
-                <h3 className="text-sm font-semibold">Review Activity</h3>
-
-                <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <StatCell label="Source Dates" value={String(operator.sourceDates.length)} />
-                  <StatCell label="Days Reviewed" value={String(operator.daysReviewed)} />
-                  <StatCell label="Days With Status" value={String(operator.daysWithReviewStatus)} />
-                  <StatCell label="Days With Notes" value={String(operator.daysWithNotes)} />
-                </div>
-
-                <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                  <div className="rounded-xl border bg-slate-50 px-3 py-2.5">
-                    <div className="text-xs text-slate-500">Review Status</div>
-                    <div className="mt-1 text-center text-sm font-semibold">{reviewStatusLabel(operator.reviewStatus)}</div>
-                  </div>
-                  <div className="rounded-xl border bg-slate-50 px-3 py-2.5">
-                    <div className="text-xs text-slate-500">Days Excluded</div>
-                    <div className="mt-1 text-center text-sm font-semibold">{operator.daysExcludedFromLeaderboard}</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <StatCard label="Review Status">
+                      {reviewStatusLabel(operator.reviewStatus)}
+                    </StatCard>
+                    <StatCard label="Days Excluded">
+                      {String(operator.daysExcludedFromLeaderboard)}
+                    </StatCard>
                   </div>
                 </div>
               </div>
-            </section>
+            </SectionBlock>
 
-            <section className="rounded-2xl bg-white border shadow-sm p-4">
-              <div className="flex items-center justify-between gap-3 mb-3">
-                <h3 className="text-sm font-semibold">Observed Area Mix</h3>
-                <div className="text-xs text-slate-500">{operator.areaMix.length} rows</div>
-              </div>
+            <OperatorUserlsTracking />
 
-              <div className="space-y-2">
+            <SectionBlock
+              title="Observed Area Mix"
+              subtitle="Observed movement context grouped by area."
+              right={<div className="text-xs text-slate-500">{operator.areaMix.length} rows</div>}
+            >
+              <div className="space-y-3">
                 {operator.areaMix.length === 0 && (
-                  <div className="text-sm text-slate-500">No observed area mix for this operator.</div>
+                  <div className="text-sm text-slate-500">
+                    No observed area mix for this operator.
+                  </div>
                 )}
 
                 {operator.areaMix.map((mix) => (
@@ -458,63 +426,66 @@ export default function OperatorDetailPage() {
                     className="rounded-xl border p-3"
                   >
                     <div className="text-sm font-medium">{mix.areaName}</div>
-                    <div className="mt-2 grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
-                      <div>
-                        <div className="text-xs text-slate-500">Letdown</div>
-                        <div className="font-semibold">{mix.letdownMoves.toLocaleString()}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-500">Putaway</div>
-                        <div className="font-semibold">{mix.putawayMoves.toLocaleString()}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-500">Restock</div>
-                        <div className="font-semibold">{mix.restockMoves.toLocaleString()}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-500">Actual Min</div>
-                        <div className="font-semibold">{mix.actualMinutes.toLocaleString()}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-500">Total Moves</div>
-                        <div className="font-semibold">
-                          {(mix.totalMoves || (mix.letdownMoves + mix.putawayMoves + mix.restockMoves)).toLocaleString()}
-                        </div>
-                      </div>
+                    <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-3">
+                      <StatCard label="Letdown">{fmt(mix.letdownMoves)}</StatCard>
+                      <StatCard label="Putaway">{fmt(mix.putawayMoves)}</StatCard>
+                      <StatCard label="Restock">{fmt(mix.restockMoves)}</StatCard>
+                      <StatCard label="Actual Min">{fmt(mix.actualMinutes)}</StatCard>
+                      <StatCard label="Total Moves">
+                        {fmt(
+                          mix.totalMoves ||
+                            mix.letdownMoves + mix.putawayMoves + mix.restockMoves
+                        )}
+                      </StatCard>
                     </div>
                   </div>
                 ))}
               </div>
-            </section>
+            </SectionBlock>
 
-            <section className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-              <SeenList title="Raw Areas Seen" values={operator.rawAssignedAreasSeen} />
-              <SeenList title="Effective Areas Seen" values={operator.effectiveAssignedAreasSeen} />
-              <SeenList title="Performance Areas Seen" values={operator.effectivePerformanceAreasSeen} />
-              <SeenList title="Raw Roles Seen" values={operator.rawAssignedRolesSeen} />
-              <SeenList title="Effective Roles Seen" values={operator.effectiveAssignedRolesSeen} />
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-slate-500">Source Dates</div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {operator.sourceDates.length === 0 ? (
-                    <span className="text-sm text-slate-400">None</span>
-                  ) : (
-                    operator.sourceDates.map((date) => (
-                      <span
-                        key={date}
-                        className="rounded-full border bg-slate-50 px-2 py-0.5 text-xs text-slate-700"
-                      >
-                        {date}
-                      </span>
-                    ))
-                  )}
+            <DetailDisclosure
+              title="Supporting Audit Detail"
+              meta={`${operator.sourceDates.length} source dates · ${operator.auditFlags.length} flags`}
+            >
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+                  <SeenList title="Raw Areas Seen" values={operator.rawAssignedAreasSeen} />
+                  <SeenList
+                    title="Effective Areas Seen"
+                    values={operator.effectiveAssignedAreasSeen}
+                  />
+                  <SeenList
+                    title="Performance Areas Seen"
+                    values={operator.effectivePerformanceAreasSeen}
+                  />
+                  <SeenList title="Raw Roles Seen" values={operator.rawAssignedRolesSeen} />
+                  <SeenList
+                    title="Effective Roles Seen"
+                    values={operator.effectiveAssignedRolesSeen}
+                  />
+
+                  <div className="rounded-xl border p-3">
+                    <div className="text-xs text-slate-500">Source Dates</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {operator.sourceDates.length === 0 ? (
+                        <span className="text-sm text-slate-400">None</span>
+                      ) : (
+                        operator.sourceDates.map((date) => (
+                          <span
+                            key={date}
+                            className="rounded-full border bg-slate-50 px-2 py-0.5 text-xs text-slate-700"
+                          >
+                            {date}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
-            </section>
+            </DetailDisclosure>
           </>
         )}
-
-        <OperatorUserlsTracking />
       </div>
     </main>
   );
