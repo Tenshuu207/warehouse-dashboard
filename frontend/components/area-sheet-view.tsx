@@ -42,14 +42,12 @@ type Row = {
 function SummaryBox({
   title,
   children,
-  className = "",
 }: {
   title: string;
   children: React.ReactNode;
-  className?: string;
 }) {
   return (
-    <div className={`border-2 border-slate-900 bg-white ${className}`}>
+    <div className="border-2 border-slate-900 bg-white">
       <div className="bg-blue-700 px-3 py-1.5 text-center text-sm font-bold text-white">
         {title}
       </div>
@@ -87,7 +85,7 @@ function TopListBox({
   );
 }
 
-export default function WeeklySheetView() {
+export default function AreaSheetView({ area }: { area: string }) {
   const { selectedWeek } = useAppState();
   const [data, setData] = useState<ResolvedDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -107,7 +105,7 @@ export default function WeeklySheetView() {
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load weekly sheet");
+          setError(err instanceof Error ? err.message : "Failed to load area sheet");
           setLoading(false);
         }
       }
@@ -137,6 +135,14 @@ export default function WeeklySheetView() {
         const totalPlates = letdownPlates + putawayPlates + restockPlates;
         const totalPieces = letdownPieces + putawayPieces + restockPieces;
 
+        const rowArea = String(
+          op.effectivePerformanceArea ||
+            op.rawDominantArea ||
+            op.effectiveAssignedArea ||
+            op.area ||
+            "Other"
+        );
+
         return {
           userid: String(op.userid || ""),
           name: String(
@@ -153,13 +159,7 @@ export default function WeeklySheetView() {
               op.rawAssignedRole ||
               "—"
           ),
-          area: String(
-            op.effectivePerformanceArea ||
-              op.rawDominantArea ||
-              op.effectiveAssignedArea ||
-              op.area ||
-              "Other"
-          ),
+          area: rowArea,
           letdownPlates,
           letdownPieces,
           putawayPlates,
@@ -173,9 +173,12 @@ export default function WeeklySheetView() {
           avgPcsPerPlate: avgPcsPerPlate(totalPieces, totalPlates),
         };
       })
-      .filter((row) => row.totalPlates > 0 || row.receivingPlates > 0)
+      .filter(
+        (row) =>
+          row.area === area && (row.totalPlates > 0 || row.receivingPlates > 0)
+      )
       .sort((a, b) => b.totalPieces - a.totalPieces);
-  }, [data]);
+  }, [data, area]);
 
   const totals = useMemo(() => {
     return rows.reduce(
@@ -207,11 +210,11 @@ export default function WeeklySheetView() {
     );
   }, [rows]);
 
-  const areaTotals = useMemo(() => {
+  const roleTotals = useMemo(() => {
     const grouped = new Map<
       string,
       {
-        area: string;
+        role: string;
         letdownPlates: number;
         letdownPieces: number;
         putawayPlates: number;
@@ -224,9 +227,9 @@ export default function WeeklySheetView() {
     >();
 
     for (const row of rows) {
-      const key = row.area || "Other";
+      const key = row.role || "—";
       const current = grouped.get(key) || {
-        area: key,
+        role: key,
         letdownPlates: 0,
         letdownPieces: 0,
         putawayPlates: 0,
@@ -285,34 +288,10 @@ export default function WeeklySheetView() {
     [rows]
   );
 
-  const topLetdown = useMemo(
-    () =>
-      [...rows]
-        .sort((a, b) => b.letdownPieces - a.letdownPieces)
-        .slice(0, 3)
-        .map((row) => ({
-          label: row.name,
-          value: fmt(row.letdownPieces),
-        })),
-    [rows]
-  );
-
-  const topPutaway = useMemo(
-    () =>
-      [...rows]
-        .sort((a, b) => b.putawayPieces - a.putawayPieces)
-        .slice(0, 3)
-        .map((row) => ({
-          label: row.name,
-          value: fmt(row.putawayPieces),
-        })),
-    [rows]
-  );
-
   if (loading) {
     return (
       <div className="border-2 border-slate-900 bg-white p-4 text-sm text-slate-600">
-        Loading weekly sheet…
+        Loading area sheet…
       </div>
     );
   }
@@ -410,7 +389,7 @@ export default function WeeklySheetView() {
 
                 <tr className="font-bold">
                   <td className="border border-slate-900 bg-slate-100 px-3 py-2" colSpan={2}>
-                    Week Total
+                    {area} Total
                   </td>
                   <td className="border border-slate-900 bg-blue-50 px-3 py-2 text-right text-red-600">
                     {fmt(totals.letdownPlates)}
@@ -445,7 +424,7 @@ export default function WeeklySheetView() {
           </div>
 
           <div className="border-l-2 border-slate-900 bg-slate-50 p-3 space-y-3">
-            <SummaryBox title={`Week ${selectedWeek}`}>
+            <SummaryBox title={`${area} · ${selectedWeek}`}>
               <div className="space-y-3">
                 <div className="border border-slate-900 bg-yellow-200 px-3 py-4 text-center">
                   <div className="text-sm font-medium text-slate-700">
@@ -458,7 +437,7 @@ export default function WeeklySheetView() {
 
                 <div className="border border-slate-900">
                   <div className="bg-green-700 px-3 py-1.5 text-center text-sm font-bold text-white">
-                    Week Total
+                    Area Total
                   </div>
                   <table className="w-full text-sm">
                     <tbody>
@@ -531,8 +510,6 @@ export default function WeeklySheetView() {
 
             <TopListBox title="Top 3 Total Plates" rows={topByPlates} />
             <TopListBox title="Top 3 Total Pieces" rows={topByPieces} />
-            <TopListBox title="Top 3 Letdowns - PCS" rows={topLetdown} />
-            <TopListBox title="Top 3 Putaways - PCS" rows={topPutaway} />
           </div>
         </div>
       </div>
@@ -542,7 +519,7 @@ export default function WeeklySheetView() {
           <thead>
             <tr className="bg-blue-700 text-white">
               <th className="border border-slate-900 px-3 py-2 text-left" colSpan={1}>
-                Total Handled by Area
+                Total Handled by Role
               </th>
               <th className="border border-slate-900 px-3 py-2 text-center" colSpan={2}>
                 Letdowns
@@ -558,7 +535,7 @@ export default function WeeklySheetView() {
               </th>
             </tr>
             <tr className="bg-slate-100 text-slate-900">
-              <th className="border border-slate-900 px-3 py-1.5 text-left">Area</th>
+              <th className="border border-slate-900 px-3 py-1.5 text-left">Role</th>
               <th className="border border-slate-900 px-3 py-1.5 text-center">Plates</th>
               <th className="border border-slate-900 px-3 py-1.5 text-center">Pieces</th>
               <th className="border border-slate-900 px-3 py-1.5 text-center">Plates</th>
@@ -570,16 +547,9 @@ export default function WeeklySheetView() {
             </tr>
           </thead>
           <tbody>
-            {areaTotals.map((row) => (
-              <tr key={`area-total-${row.area}`}>
-                <td className="border border-slate-900 px-3 py-1.5 font-medium">
-                  <Link
-                    href={`/areas/${encodeURIComponent(row.area)}`}
-                    className="hover:underline"
-                  >
-                    {row.area}
-                  </Link>
-                </td>
+            {roleTotals.map((row) => (
+              <tr key={`role-total-${row.role}`}>
+                <td className="border border-slate-900 px-3 py-1.5 font-medium">{row.role}</td>
                 <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
                   {fmt(row.letdownPlates)}
                 </td>
