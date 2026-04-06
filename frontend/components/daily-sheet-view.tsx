@@ -15,6 +15,11 @@ type DailyResponse = {
   operators?: Array<Record<string, unknown>>;
 };
 
+type Tracking = {
+  primaryReplenishmentRole?: string | null;
+  primaryReplenishmentAreaCode?: string | null;
+};
+
 function fmt(value: number | null | undefined, digits = 0) {
   return Number(value || 0).toLocaleString("en-US", {
     minimumFractionDigits: digits,
@@ -83,21 +88,98 @@ function resolvedSheetName(
   return display || cleanDisplayName(op);
 }
 
-function sectionLabel(area: string) {
-  const value = (area || "").trim();
+function normalizeToken(value: unknown) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
+}
 
-  if (/^frzpir$/i.test(value)) return "Freezer PIR";
-  if (/^frz/i.test(value)) return "Freezer";
-  if (/^drypir$/i.test(value)) return "Dry PIR";
-  if (/^dry/i.test(value)) return "Dry";
-  if (/^clr/i.test(value) || /^produce$/i.test(value)) return "Cooler";
+function classifyFromRole(value: unknown): string | null {
+  const v = normalizeToken(value);
+  if (!v) return null;
+
+  if (v.startsWith("FRZPIR")) return "Freezer PIR";
+  if (v.startsWith("DRYPIR")) return "Dry PIR";
+  if (v.startsWith("FRZ")) return "Freezer";
+  if (v.startsWith("DRY")) return "Dry";
+  if (v.startsWith("CLR") || v === "PRODUCE") return "Cooler";
+
+  return null;
+}
+
+function classifyFromArea(value: unknown): string | null {
+  const raw = String(value || "").trim();
+  const v = normalizeToken(value);
+  if (!v) return null;
+
+  if (raw === "7" || v.startsWith("7-") || v.startsWith("FRZPIR")) return "Freezer PIR";
+  if (raw === "5" || v.startsWith("5-") || v.startsWith("DRYPIR")) return "Dry PIR";
+
+  if (raw === "6" || v.startsWith("6-") || v.startsWith("FRZ")) return "Freezer";
+  if (raw === "1" || v.startsWith("1-") || v.startsWith("DRY")) return "Dry";
+
+  if (
+    raw === "2" ||
+    raw === "3" ||
+    raw === "4" ||
+    v.startsWith("2-") ||
+    v.startsWith("3-") ||
+    v.startsWith("4-") ||
+    v.startsWith("CLR") ||
+    v === "PRODUCE"
+  ) {
+    return "Cooler";
+  }
+
+  return null;
+}
+
+function inferSection(op: Record<string, unknown>) {
+  const tracking = (op.userlsTracking || {}) as Tracking;
+
+  const roleCandidates = [
+    tracking.primaryReplenishmentRole,
+    op.observedRole,
+    op.effectiveAssignedRole,
+    op.currentRole,
+    op.rawAssignedRole,
+  ];
+
+  for (const value of roleCandidates) {
+    const section = classifyFromRole(value);
+    if (section) return section;
+  }
+
+  const areaCandidates = [
+    tracking.primaryReplenishmentAreaCode,
+    op.observedArea,
+    op.effectivePerformanceArea,
+    op.rawDominantArea,
+    op.effectiveAssignedArea,
+    op.assignedArea,
+    op.area,
+  ];
+
+  for (const value of areaCandidates) {
+    const section = classifyFromArea(value);
+    if (section) return section;
+  }
 
   return "Other";
 }
 
+const SECTION_ORDER = [
+  "Freezer",
+  "Freezer PIR",
+  "Dry",
+  "Dry PIR",
+  "Cooler",
+  "Other",
+] as const;
+
 function sectionOrderIndex(section: string) {
-  const order = ["Freezer", "Freezer PIR", "Dry", "Dry PIR", "Cooler", "Other"];
-  const idx = order.indexOf(section);
+  const idx = SECTION_ORDER.indexOf(section as (typeof SECTION_ORDER)[number]);
   return idx === -1 ? 999 : idx;
 }
 
@@ -264,7 +346,7 @@ export default function DailySheetView() {
               "—"
           ),
           area,
-          section: sectionLabel(area),
+          section: inferSection(op),
           letdownPlates,
           letdownPieces,
           putawayPlates,
@@ -292,16 +374,10 @@ export default function DailySheetView() {
   }, [data, selectedWeek, employees, mappings, defaults]);
 
   const sections = useMemo(() => {
-    const grouped = new Map<string, Row[]>();
+    return SECTION_ORDER.map((section) => {
+      const sectionRows = rows.filter((row) => row.section === section);
 
-    for (const row of rows) {
-      if (!grouped.has(row.section)) grouped.set(row.section, []);
-      grouped.get(row.section)!.push(row);
-    }
-
-    return [...grouped.entries()]
-      .sort((a, b) => sectionOrderIndex(a[0]) - sectionOrderIndex(b[0]))
-      .map(([section, sectionRows]) => ({
+      return {
         section,
         rows: sectionRows,
         totals: sectionRows.reduce(
@@ -327,7 +403,8 @@ export default function DailySheetView() {
             totalPieces: 0,
           }
         ),
-      }));
+      };
+    });
   }, [rows]);
 
   const totals = useMemo(() => {
@@ -433,47 +510,58 @@ export default function DailySheetView() {
                 </tr>
               </thead>
               <tbody>
-                {section.rows.map((row) => (
-                  <tr key={row.userid}>
-                    <td className="border border-slate-900 px-3 py-1.5 font-medium">
-                      <Link
-                        href={`/operators/${encodeURIComponent(row.userid)}`}
-                        className="hover:underline"
-                      >
-                        {row.name}
-                      </Link>
-                      <div className="text-[11px] text-slate-500">{row.userid}</div>
-                    </td>
-                    <td className="border border-slate-900 px-3 py-1.5">{row.role}</td>
-                    <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
-                      {fmt(row.letdownPlates)}
-                    </td>
-                    <td className="border border-slate-900 bg-green-50 px-3 py-1.5 text-right">
-                      {fmt(row.letdownPieces)}
-                    </td>
-                    <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
-                      {fmt(row.putawayPlates)}
-                    </td>
-                    <td className="border border-slate-900 bg-green-50 px-3 py-1.5 text-right">
-                      {fmt(row.putawayPieces)}
-                    </td>
-                    <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
-                      {fmt(row.restockPlates)}
-                    </td>
-                    <td className="border border-slate-900 bg-green-50 px-3 py-1.5 text-right">
-                      {fmt(row.restockPieces)}
-                    </td>
-                    <td className="border border-slate-900 bg-yellow-200 px-3 py-1.5 text-right font-semibold">
-                      {fmt(row.totalPlates)}
-                    </td>
-                    <td className="border border-slate-900 bg-yellow-200 px-3 py-1.5 text-right font-semibold">
-                      {fmt(row.totalPieces)}
-                    </td>
-                    <td className="border border-slate-900 bg-yellow-100 px-3 py-1.5 text-right">
-                      {fmt(row.avgPcsPerPlate, 0)}
+                {section.rows.length === 0 ? (
+                  <tr>
+                    <td
+                      className="border border-slate-900 px-3 py-3 text-sm text-slate-500"
+                      colSpan={11}
+                    >
+                      No rows in this section for {selectedWeek}.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  section.rows.map((row) => (
+                    <tr key={row.userid}>
+                      <td className="border border-slate-900 px-3 py-1.5 font-medium">
+                        <Link
+                          href={`/operators/${encodeURIComponent(row.userid)}`}
+                          className="hover:underline"
+                        >
+                          {row.name}
+                        </Link>
+                        <div className="text-[11px] text-slate-500">{row.userid}</div>
+                      </td>
+                      <td className="border border-slate-900 px-3 py-1.5">{row.role}</td>
+                      <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
+                        {fmt(row.letdownPlates)}
+                      </td>
+                      <td className="border border-slate-900 bg-green-50 px-3 py-1.5 text-right">
+                        {fmt(row.letdownPieces)}
+                      </td>
+                      <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
+                        {fmt(row.putawayPlates)}
+                      </td>
+                      <td className="border border-slate-900 bg-green-50 px-3 py-1.5 text-right">
+                        {fmt(row.putawayPieces)}
+                      </td>
+                      <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
+                        {fmt(row.restockPlates)}
+                      </td>
+                      <td className="border border-slate-900 bg-green-50 px-3 py-1.5 text-right">
+                        {fmt(row.restockPieces)}
+                      </td>
+                      <td className="border border-slate-900 bg-yellow-200 px-3 py-1.5 text-right font-semibold">
+                        {fmt(row.totalPlates)}
+                      </td>
+                      <td className="border border-slate-900 bg-yellow-200 px-3 py-1.5 text-right font-semibold">
+                        {fmt(row.totalPieces)}
+                      </td>
+                      <td className="border border-slate-900 bg-yellow-100 px-3 py-1.5 text-right">
+                        {fmt(row.avgPcsPerPlate, 0)}
+                      </td>
+                    </tr>
+                  ))
+                )}
 
                 <tr className="font-bold">
                   <td className="border border-slate-900 bg-slate-100 px-3 py-2" colSpan={2}>
