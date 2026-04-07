@@ -16,6 +16,7 @@ const PRIMARY_ITEMS = [
 const SECONDARY_ITEMS = [
   { href: "/weekly-sheet", label: "Weekly Sheet" },
   { href: "/daily-sheet", label: "Daily Sheet" },
+  { href: "/range-sheet", label: "Range Sheet" },
   { href: "/home-assignments", label: "Homes" },
   { href: "/daily-assignments", label: "Day Assign" },
   { href: "/options", label: "Options" },
