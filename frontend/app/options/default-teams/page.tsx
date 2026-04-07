@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import DashboardNav from "@/components/dashboard-nav";
 import { useAppState } from "@/lib/app-state";
 import { getWeekData } from "@/lib/data-resolver";
 
@@ -155,7 +154,6 @@ export default function DefaultTeamsPage() {
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900 p-3 md:p-4">
       <div className="mx-auto max-w-6xl space-y-4">
-        <DashboardNav />
 
         <section className="rounded-2xl bg-white border shadow-sm p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">

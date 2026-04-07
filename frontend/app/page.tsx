@@ -1,21 +1,43 @@
 "use client";
 
-import Link from "next/link";
-import { useState } from "react";
-import DashboardNav from "@/components/dashboard-nav";
+import { useEffect, useState } from "react";
 import ControlBar from "@/components/control-bar";
 import OverviewEnrichedCore from "@/components/overview-enriched-core";
 import WeeklySheetView from "@/components/weekly-sheet-view";
 
 type OverviewMode = "sheet" | "detail";
 
+const STORAGE_KEY = "warehouse-dashboard-overview-mode";
+
 export default function HomePage() {
   const [mode, setMode] = useState<OverviewMode>("sheet");
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(STORAGE_KEY);
+      if (saved === "sheet" || saved === "detail") {
+        setMode(saved);
+      }
+    } catch {
+      // ignore localStorage issues
+    } finally {
+      setReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    try {
+      window.localStorage.setItem(STORAGE_KEY, mode);
+    } catch {
+      // ignore localStorage issues
+    }
+  }, [mode, ready]);
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900 p-3 md:p-4">
       <div className="max-w-[1800px] xl:ml-0 xl:mr-auto space-y-4 min-w-0">
-        <DashboardNav />
         <ControlBar />
 
         <section className="rounded-2xl bg-white border shadow-sm p-4 space-y-4">
@@ -51,39 +73,6 @@ export default function HomePage() {
                 Detail View
               </button>
             </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href="/weekly-sheet"
-              className="rounded-lg border bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Weekly Sheet
-            </Link>
-            <Link
-              href="/daily-sheet"
-              className="rounded-lg border bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Daily Sheet
-            </Link>
-            <Link
-              href="/areas"
-              className="rounded-lg border bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Areas
-            </Link>
-            <Link
-              href="/operators"
-              className="rounded-lg border bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Operators
-            </Link>
-            <Link
-              href="/assignment-review"
-              className="rounded-lg border bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Assignment Review
-            </Link>
           </div>
         </section>
 

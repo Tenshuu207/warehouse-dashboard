@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import DashboardNav from "@/components/dashboard-nav";
 import ControlBar from "@/components/control-bar";
 import { useAppState } from "@/lib/app-state";
 import { getWeekData, type ResolvedDashboardData } from "@/lib/data-resolver";
@@ -381,7 +380,6 @@ export default function ReviewPage() {
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900 p-3 md:p-4">
       <div className="max-w-[1700px] xl:ml-0 xl:mr-auto space-y-4 min-w-0">
-        <DashboardNav />
         <ControlBar />
 
         <section className="rounded-2xl bg-white border shadow-sm p-4">

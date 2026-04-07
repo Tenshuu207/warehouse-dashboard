@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import DashboardNav from "@/components/dashboard-nav";
 import ControlBar from "@/components/control-bar";
 import PageHeader from "@/components/shared/PageHeader";
 import StatCard from "@/components/shared/StatCard";
@@ -403,7 +402,6 @@ export default function AssignmentReviewPage() {
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900 p-3 md:p-4">
       <div className="max-w-[1800px] xl:ml-0 xl:mr-auto space-y-4 min-w-0">
-        <DashboardNav />
         <ControlBar />
 
         <SectionBlock

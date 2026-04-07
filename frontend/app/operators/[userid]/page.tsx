@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import DashboardNav from "@/components/dashboard-nav";
 import OperatorUserlsTracking from "@/components/operator-userls-tracking";
 import ControlBar from "@/components/control-bar";
 import PageHeader from "@/components/shared/PageHeader";
@@ -227,7 +226,6 @@ export default function OperatorDetailPage() {
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900 p-3 md:p-4">
       <div className="max-w-[1500px] xl:ml-0 xl:mr-auto space-y-4 min-w-0 overflow-x-hidden">
-        <DashboardNav />
         <ControlBar />
 
         <SectionBlock

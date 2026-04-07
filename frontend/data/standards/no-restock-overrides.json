@@ -1,0 +1,49 @@
+{
+  "teamAreas": [
+    {
+      "scopeType": "team_area",
+      "scopeName": "Dry",
+      "dailyPlatesStandard": 208.5,
+      "status": "ready",
+      "notes": "Combined team standard from median Dry team-day totals. Not normalized per operator.",
+      "dailyPiecesStandard": 5075.5,
+      "dailyPiecesPerPlateStandard": 24.343,
+      "estimatedHoursPerDayFrom2025Hours": 18.898,
+      "platesPerHourEstimated": 11.033,
+      "piecesPerHourEstimated": 268.573
+    },
+    {
+      "scopeType": "team_area",
+      "scopeName": "Cooler",
+      "dailyPlatesStandard": 298.5,
+      "dailyPiecesStandard": 5228.5,
+      "dailyPiecesPerPlateStandard": 17.516,
+      "estimatedHoursPerDayFrom2025Hours": 28.041,
+      "platesPerHourEstimated": 10.645,
+      "piecesPerHourEstimated": 186.459,
+      "status": "ready",
+      "notes": "Combined team standard from median Cooler team-day totals. Not normalized per operator."
+    },
+    {
+      "scopeType": "team_area",
+      "scopeName": "Freezer",
+      "dailyPlatesStandard": 327.0,
+      "dailyPiecesStandard": 7610.0,
+      "dailyPiecesPerPlateStandard": 23.272,
+      "estimatedHoursPerDayFrom2025Hours": 25.914,
+      "platesPerHourEstimated": 12.619,
+      "piecesPerHourEstimated": 293.664,
+      "status": "ready",
+      "notes": "Combined team standard from median Freezer team-day totals. Not normalized per operator."
+    }
+  ],
+  "roles": [
+    {
+      "scopeType": "role",
+      "scopeName": "DryMix",
+      "dailyPlatesStandard": 105,
+      "status": "ready",
+      "notes": "Manual override test"
+    }
+  ]
+}

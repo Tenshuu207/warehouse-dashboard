@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import DashboardNav from "@/components/dashboard-nav";
 
 type EmployeeRow = {
   rowKey: string;
@@ -195,7 +194,6 @@ export default function EmployeesPage() {
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900 p-3 md:p-4">
       <div className="mx-auto max-w-7xl space-y-4">
-        <DashboardNav />
 
         <section className="rounded-2xl bg-white border shadow-sm p-4">
           <div className="text-xs text-slate-500 mb-2">
