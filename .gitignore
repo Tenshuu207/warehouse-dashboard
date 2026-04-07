@@ -38,3 +38,9 @@ build/
 ingest/derived/
 
 # Keep page backups and source/config tracked
+# local sqlite runtime state
+ingest/state/
+*.db
+*.db-shm
+*.db-wal
+warehouse_db_phase1_patch.sh
