@@ -233,3 +233,32 @@ export function resolveNearestSnapshot<T>(
     payload: JSON.parse(oldest.payload_json) as T,
   };
 }
+
+export function listSnapshotsInRange<T>(
+  snapshotType: string,
+  startKey: string,
+  endKey: string
+): Array<{ dateKey: string; payload: T }> {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `
+        SELECT date_key, payload_json
+        FROM snapshots
+        WHERE snapshot_type = ?
+          AND date_key >= ?
+          AND date_key <= ?
+        ORDER BY date_key ASC
+      `
+    )
+    .all(snapshotType, startKey, endKey) as Array<{
+      date_key: string;
+      payload_json: string;
+    }>;
+
+  return rows.map((row) => ({
+    dateKey: row.date_key,
+    payload: JSON.parse(row.payload_json) as T,
+  }));
+}
+

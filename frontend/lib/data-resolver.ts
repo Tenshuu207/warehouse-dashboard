@@ -387,3 +387,20 @@ export async function getWeekData(selectedDate: string): Promise<ResolvedDashboa
   const raw = asObj(await dailyRes.json());
   return normalizeRaw(raw);
 }
+
+export async function getRangeData(
+  startDate: string,
+  endDate: string
+): Promise<ResolvedDashboardData> {
+  const res = await fetch(`/api/dashboard/range?start=${startDate}&end=${endDate}`, {
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to load dashboard range data for ${startDate} to ${endDate}`);
+  }
+
+  const raw = asObj(await res.json());
+  return normalizeRaw(raw);
+}
+
