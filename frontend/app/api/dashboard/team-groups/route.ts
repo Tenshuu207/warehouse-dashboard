@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { getSnapshot } from "@/lib/server/db";
 
 type AreaBucket = {
   areaCode?: string | null;
@@ -196,8 +197,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "invalid_date" }, { status: 400 });
     }
 
-    const raw = await fs.readFile(dailyEnrichedPath(date), "utf-8");
-    const parsed = JSON.parse(raw);
+    const parsed =
+      getSnapshot<Record<string, unknown>>("daily_enriched", date) ||
+      JSON.parse(await fs.readFile(dailyEnrichedPath(date), "utf-8"));
     const operators: OperatorRow[] = Array.isArray(parsed.operators) ? parsed.operators : [];
 
     const teams: Record<string, TeamAccumulator> = {};

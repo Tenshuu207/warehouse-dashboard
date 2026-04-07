@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from common import load_json, save_json
+from db_sqlite import connect, upsert_dataset_component, upsert_snapshot
 
 
 def avg(pieces: int | float, plates: int | float) -> float:
@@ -575,6 +576,20 @@ def build_weekly_dashboard(daily_dir: str, week_start: str, output_path: str) ->
     }
 
     save_json(output_path, payload)
+
+    conn = connect()
+    try:
+        upsert_snapshot(conn, "weekly", week_start, payload, source_path=output_path)
+        upsert_dataset_component(
+            conn,
+            business_date=week_start,
+            component_type="weekly",
+            status="ready",
+            source_path=output_path,
+            details={"weekStart": week_start, "sourceDates": payload.get("sourceDates", [])},
+        )
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

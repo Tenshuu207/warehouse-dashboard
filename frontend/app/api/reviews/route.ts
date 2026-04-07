@@ -3,31 +3,24 @@ import { promises as fs } from "fs";
 import path from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { getJsonValue, upsertJsonValue } from "@/lib/server/db";
 
 const execFileAsync = promisify(execFile);
 
 function reviewFilePath(date: string) {
-  return path.join(
-    process.cwd(),
-    "..",
-    "ingest",
-    "config",
-    "reviews",
-    `${date}.json`
-  );
+  return path.join(process.cwd(), "..", "ingest", "config", "reviews", `${date}.json`);
 }
 
 function optionsFilePath() {
-  return path.join(
-    process.cwd(),
-    "..",
-    "ingest",
-    "config",
-    "options.json"
-  );
+  return path.join(process.cwd(), "..", "ingest", "config", "options.json");
 }
 
 async function readReviewFile(date: string) {
+  const fromDb = getJsonValue<Record<string, unknown>>("reviews", date);
+  if (fromDb) {
+    return fromDb;
+  }
+
   const filePath = reviewFilePath(date);
 
   try {
@@ -103,10 +96,7 @@ async function triggerRebuild(date: string) {
 export async function GET(req: NextRequest) {
   const date = req.nextUrl.searchParams.get("date");
   if (!date) {
-    return NextResponse.json(
-      { error: "missing_date" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "missing_date" }, { status: 400 });
   }
 
   const data = await readReviewFile(date);
@@ -121,10 +111,7 @@ export async function POST(req: NextRequest) {
     const userid = body?.userid;
 
     if (!date || !userid) {
-      return NextResponse.json(
-        { error: "missing_date_or_userid" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "missing_date_or_userid" }, { status: 400 });
     }
 
     const options = await readOptions();
@@ -151,24 +138,24 @@ export async function POST(req: NextRequest) {
     }
 
     const current = await readReviewFile(date);
-    current.operators ||= {};
-    current.operators[userid] ||= {};
+    (current as { operators?: Record<string, Record<string, unknown>> }).operators ||= {};
+    (current as { operators: Record<string, Record<string, unknown>> }).operators[userid] ||= {};
 
-    const existing = current.operators[userid];
+    const existing = (current as { operators: Record<string, Record<string, unknown>> }).operators[userid];
 
     const mergedPerformanceOverrides = {
       ...(existing.performanceOverrides || {}),
       ...(body.performanceOverrides || {}),
     };
 
-    if (mergedPerformanceOverrides.forceArea && !options.areas.includes(mergedPerformanceOverrides.forceArea)) {
+    if (mergedPerformanceOverrides.forceArea && !options.areas.includes(String(mergedPerformanceOverrides.forceArea))) {
       return NextResponse.json(
         { error: "invalid_force_area", forceArea: mergedPerformanceOverrides.forceArea },
         { status: 400 }
       );
     }
 
-    current.operators[userid] = {
+    (current as { operators: Record<string, Record<string, unknown>> }).operators[userid] = {
       ...existing,
       ...(body.name !== undefined ? { name: body.name } : {}),
       ...(body.assignedRole !== undefined ? { assignedRole: body.assignedRole } : {}),
@@ -185,6 +172,7 @@ export async function POST(req: NextRequest) {
     const filePath = reviewFilePath(date);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, JSON.stringify(current, null, 2), "utf-8");
+    upsertJsonValue("reviews", date, current, filePath);
 
     const rebuild = await triggerRebuild(date);
 
@@ -192,7 +180,7 @@ export async function POST(req: NextRequest) {
       status: "saved",
       date,
       userid,
-      operator: current.operators[userid],
+      operator: (current as { operators: Record<string, Record<string, unknown>> }).operators[userid],
       rebuild,
     });
   } catch (error) {

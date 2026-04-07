@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { getSnapshot } from "@/lib/server/db";
 
 function dailyEnrichedPath(date: string) {
   return path.join(process.cwd(), "..", "ingest", "derived", "daily_enriched", `${date}.json`);
@@ -19,9 +20,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "invalid_date" }, { status: 400 });
     }
 
-    const filePath = dailyEnrichedPath(date);
-    const raw = await fs.readFile(filePath, "utf-8");
-    const parsed = JSON.parse(raw);
+    const fromDb = getSnapshot<Record<string, unknown>>("daily_enriched", date);
+    const parsed = fromDb || JSON.parse(await fs.readFile(dailyEnrichedPath(date), "utf-8"));
 
     const operators = Array.isArray(parsed.operators) ? parsed.operators : [];
     const userlsOnlyUsers = Array.isArray(parsed.userlsOnlyUsers) ? parsed.userlsOnlyUsers : [];
@@ -37,10 +37,14 @@ export async function GET(req: NextRequest) {
         userlsTrackingSummary: parsed.userlsTrackingSummary || null,
         operator,
         userlsOnlyUser,
+        source: fromDb ? "sqlite" : "json",
       });
     }
 
-    return NextResponse.json(parsed);
+    return NextResponse.json({
+      ...parsed,
+      source: fromDb ? "sqlite" : "json",
+    });
   } catch (error) {
     return NextResponse.json(
       {

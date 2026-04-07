@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 import crypto from "crypto";
+import { getJsonValue, insertAuditEvent, upsertJsonValue } from "@/lib/server/db";
 
 type OptionsData = {
   areas: string[];
@@ -36,14 +37,7 @@ function optionsFilePath() {
 }
 
 function optionsAuditFilePath() {
-  return path.join(
-    process.cwd(),
-    "..",
-    "ingest",
-    "config",
-    "audit",
-    "options-events.ndjson"
-  );
+  return path.join(process.cwd(), "..", "ingest", "config", "audit", "options-events.ndjson");
 }
 
 const DEFAULTS: OptionsData = {
@@ -77,12 +71,16 @@ function normalizeOptions(value: unknown): OptionsData {
   return {
     areas: normalizeList(obj.areas),
     roles: normalizeList(obj.roles),
-    reviewStatuses:
-      reviewStatuses.length > 0 ? reviewStatuses : DEFAULTS.reviewStatuses,
+    reviewStatuses: reviewStatuses.length > 0 ? reviewStatuses : DEFAULTS.reviewStatuses,
   };
 }
 
 async function readOptions(): Promise<OptionsData> {
+  const fromDb = getJsonValue<OptionsData>("config", "options");
+  if (fromDb) {
+    return normalizeOptions(fromDb);
+  }
+
   try {
     const raw = await fs.readFile(optionsFilePath(), "utf-8");
     return normalizeOptions(JSON.parse(raw));
@@ -97,9 +95,7 @@ function diffList(before: string[], after: string[]): ListChange {
 
   const added = after.filter((item) => !beforeSet.has(item));
   const removed = before.filter((item) => !afterSet.has(item));
-  const orderChanged =
-    before.length === after.length &&
-    before.some((item, index) => item !== after[index]);
+  const orderChanged = before.length === after.length && before.some((item, index) => item !== after[index]);
 
   return {
     added,
@@ -159,13 +155,17 @@ export async function POST(req: NextRequest) {
 
     await fs.mkdir(path.dirname(optionsFilePath()), { recursive: true });
     await fs.writeFile(optionsFilePath(), JSON.stringify(after, null, 2), "utf-8");
+    upsertJsonValue("config", "options", after, optionsFilePath());
 
     if (eventHasChanges(auditEvent)) {
       await fs.mkdir(path.dirname(optionsAuditFilePath()), { recursive: true });
-      await fs.appendFile(
-        optionsAuditFilePath(),
-        JSON.stringify(auditEvent) + "\n",
-        "utf-8"
+      await fs.appendFile(optionsAuditFilePath(), JSON.stringify(auditEvent) + "\n", "utf-8");
+      insertAuditEvent(
+        auditEvent.eventId,
+        auditEvent.eventType,
+        auditEvent.timestamp,
+        auditEvent.source,
+        auditEvent
       );
     }
 

@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from db_sqlite import connect, record_upload
+
 
 REPORT_TYPES = {"b_forkl2", "rf2_forkstdl", "rf2_userls"}
 
@@ -100,6 +102,25 @@ def register_ingest(
     if existing_same_checksum:
         manifest["updatedAt"] = utc_now_iso()
         save_json(mpath, manifest)
+
+        conn = connect()
+        try:
+            record_upload(
+                conn,
+                business_date=business_date,
+                report_type=report_type,
+                source_path=source,
+                checksum=checksum,
+                size_bytes=size,
+                status="duplicate",
+                run_id=existing_same_checksum.get("runId"),
+                duplicate_of_run_id=existing_same_checksum.get("runId"),
+                manifest_path=mpath,
+                details={"activeRun": report_entry.get("activeRun")},
+            )
+        finally:
+            conn.close()
+
         return {
             "status": "duplicate",
             "date": business_date,
@@ -131,6 +152,23 @@ def register_ingest(
     report_entry["activeRun"] = run_id
     manifest["updatedAt"] = utc_now_iso()
     save_json(mpath, manifest)
+
+    conn = connect()
+    try:
+        record_upload(
+            conn,
+            business_date=business_date,
+            report_type=report_type,
+            source_path=source,
+            checksum=checksum,
+            size_bytes=size,
+            status="registered",
+            run_id=run_id,
+            manifest_path=mpath,
+            details={"activeRun": run_id},
+        )
+    finally:
+        conn.close()
 
     return {
         "status": "registered",

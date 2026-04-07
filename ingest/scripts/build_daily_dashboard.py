@@ -6,6 +6,7 @@ from typing import Any
 
 from common import load_json, save_json
 from review_overrides import load_review_overrides, get_operator_override
+from db_sqlite import connect, upsert_dataset_component, upsert_snapshot
 
 
 def avg(pieces: int | float, plates: int | float) -> float:
@@ -451,6 +452,20 @@ def build_dashboard(
     }
 
     save_json(output_path, payload)
+
+    conn = connect()
+    try:
+        upsert_snapshot(conn, "daily", report_date, payload, source_path=output_path)
+        upsert_dataset_component(
+            conn,
+            business_date=report_date,
+            component_type="daily",
+            status="ready",
+            source_path=output_path,
+            details={"date": report_date},
+        )
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":
