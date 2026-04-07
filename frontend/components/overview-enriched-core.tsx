@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/lib/app-state";
+import PageHeader from "./shared/PageHeader";
+import StatCard from "./shared/StatCard";
 
 type TeamGroupsResponse = {
   date: string;
@@ -195,38 +197,18 @@ export default function OverviewEnrichedCore() {
 
   return (
     <section className="rounded-2xl bg-white border shadow-sm p-4 space-y-4">
-      <div>
-        <h3 className="text-lg font-bold">Overview Core (Enriched)</h3>
-        <p className="mt-1 text-sm text-slate-500">
-          Main weekly snapshot from enriched team grouping, observed replenishment roles, and receiving destination context.
-        </p>
-      </div>
+      <PageHeader
+        title="Overview Core (Enriched)"
+        subtitle="Main weekly snapshot from enriched team grouping, observed replenishment roles, and receiving destination context."
+      />
 
       <div className="grid grid-cols-2 xl:grid-cols-6 gap-3">
-        <div className="rounded-xl border bg-slate-50 p-3 text-center">
-          <div className="text-[11px] text-slate-500">Teams</div>
-          <div className="mt-2 text-2xl font-semibold">{summary.teams}</div>
-        </div>
-        <div className="rounded-xl border bg-slate-50 p-3 text-center">
-          <div className="text-[11px] text-slate-500">Operators</div>
-          <div className="mt-2 text-2xl font-semibold">{summary.operators}</div>
-        </div>
-        <div className="rounded-xl border bg-slate-50 p-3 text-center">
-          <div className="text-[11px] text-slate-500">Repl Plates</div>
-          <div className="mt-2 text-2xl font-semibold">{fmt(summary.replPlates)}</div>
-        </div>
-        <div className="rounded-xl border bg-slate-50 p-3 text-center">
-          <div className="text-[11px] text-slate-500">Repl Pieces</div>
-          <div className="mt-2 text-2xl font-semibold">{fmt(summary.replPieces)}</div>
-        </div>
-        <div className="rounded-xl border bg-slate-50 p-3 text-center">
-          <div className="text-[11px] text-slate-500">Receiving Plates</div>
-          <div className="mt-2 text-2xl font-semibold">{fmt(summary.recvPlates)}</div>
-        </div>
-        <div className="rounded-xl border bg-slate-50 p-3 text-center">
-          <div className="text-[11px] text-slate-500">Receiving Pieces</div>
-          <div className="mt-2 text-2xl font-semibold">{fmt(summary.recvPieces)}</div>
-        </div>
+        <StatCard label="Teams">{summary.teams}</StatCard>
+        <StatCard label="Operators">{summary.operators}</StatCard>
+        <StatCard label="Repl Plates">{fmt(summary.replPlates)}</StatCard>
+        <StatCard label="Repl Pieces">{fmt(summary.replPieces)}</StatCard>
+        <StatCard label="Receiving Plates">{fmt(summary.recvPlates)}</StatCard>
+        <StatCard label="Receiving Pieces">{fmt(summary.recvPieces)}</StatCard>
       </div>
 
       <div>

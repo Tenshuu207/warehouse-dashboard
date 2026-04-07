@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import DashboardNav from "@/components/dashboard-nav";
 
 function SettingsCard({
   title,
@@ -43,7 +42,6 @@ export default function OptionsPage() {
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900 p-3 md:p-4">
       <div className="mx-auto max-w-6xl space-y-4">
-        <DashboardNav />
 
         <section className="rounded-2xl bg-white border shadow-sm p-4">
           <h2 className="text-xl font-bold">Options</h2>

@@ -2,8 +2,12 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import DashboardNav from "@/components/dashboard-nav";
 import ControlBar from "@/components/control-bar";
+import PageHeader from "@/components/shared/PageHeader";
+import StatCard from "@/components/shared/StatCard";
+import ContextBadge from "@/components/shared/ContextBadge";
+import DetailDisclosure from "@/components/shared/DetailDisclosure";
+import SectionBlock from "@/components/shared/SectionBlock";
 import { useAppState } from "@/lib/app-state";
 import { getWeekData, type ResolvedDashboardData } from "@/lib/data-resolver";
 import type {
@@ -76,22 +80,13 @@ type AssignmentReviewDisplayRow = ReturnType<typeof buildAssignmentReviewRow> & 
   userlsTracking?: UserlsTracking | null;
 };
 
-function confidenceClasses(confidence: string): string {
-  switch (confidence) {
-    case "high":
-      return "bg-green-100 text-green-800 border-green-200";
-    case "medium":
-      return "bg-blue-100 text-blue-800 border-blue-200";
-    case "low":
-      return "bg-amber-100 text-amber-800 border-amber-200";
-    default:
-      return "bg-slate-100 text-slate-700 border-slate-200";
-  }
-}
-
 function pct(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
   return `${(Number(value) * 100).toFixed(1)}%`;
+}
+
+function fmt(value: number | null | undefined): string {
+  return new Intl.NumberFormat("en-US").format(Number(value || 0));
 }
 
 function buildReceivingMixSummary(tracking?: UserlsTracking | null): string | null {
@@ -128,6 +123,28 @@ function buildReceivingMixSummary(tracking?: UserlsTracking | null): string | nu
       return area;
     })
     .join(", ");
+}
+
+function statusTone(status: "pending" | "resolved" | "ignored"): string {
+  switch (status) {
+    case "resolved":
+      return "text-green-700";
+    case "ignored":
+      return "text-slate-500";
+    default:
+      return "text-amber-700";
+  }
+}
+
+function statusLabel(status: "pending" | "resolved" | "ignored"): string {
+  switch (status) {
+    case "resolved":
+      return "Resolved";
+    case "ignored":
+      return "Ignored";
+    default:
+      return "Pending";
+  }
 }
 
 export default function AssignmentReviewPage() {
@@ -291,6 +308,10 @@ export default function AssignmentReviewPage() {
     const resolved = rows.filter((row) => row.assignmentStatus === "resolved").length;
     const ignored = rows.filter((row) => row.assignmentStatus === "ignored").length;
     const clear = rows.length - active - resolved - ignored;
+    const observedMismatch = rows.filter(
+      (row) => row.suggestedArea && row.currentAssignedArea !== row.suggestedArea
+    ).length;
+    const receivingContext = rows.filter((row) => buildReceivingMixSummary(row.userlsTracking)).length;
 
     return {
       total: rows.length,
@@ -298,6 +319,8 @@ export default function AssignmentReviewPage() {
       resolved,
       ignored,
       clear,
+      observedMismatch,
+      receivingContext,
     };
   }, [rows]);
 
@@ -379,54 +402,39 @@ export default function AssignmentReviewPage() {
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900 p-3 md:p-4">
       <div className="max-w-[1800px] xl:ml-0 xl:mr-auto space-y-4 min-w-0">
-        <DashboardNav />
         <ControlBar />
 
-        <section className="rounded-2xl bg-white border shadow-sm p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="text-xl font-bold">Assignment Review</h2>
-              <p className="mt-1 text-xs text-slate-600">
-                Compare home team against observed team for the selected period. UserLS observed role and receiving destination mix are shown as context, not automatic override truth.
-              </p>
-            </div>
-            <div className="text-right text-xs text-slate-500">
-              <div>{selectedWeek}</div>
-            </div>
-          </div>
+        <SectionBlock
+          title=""
+          right={<div className="text-right text-xs text-slate-500">{selectedWeek}</div>}
+        >
+          <PageHeader
+            title="Assignment Review"
+            subtitle="Workflow-first review queue using home team, observed team, observed role, and receiving destination context."
+          />
 
-          <div className="mt-4 grid grid-cols-2 xl:grid-cols-5 gap-3">
-            <div className="rounded-xl border bg-slate-50 p-3 text-center">
-              <div className="text-[11px] text-slate-500">Operators</div>
-              <div className="mt-2 text-2xl font-semibold">{stats.total}</div>
-            </div>
-            <div className="rounded-xl border bg-slate-50 p-3 text-center">
-              <div className="text-[11px] text-slate-500">Active Review</div>
-              <div className="mt-2 text-2xl font-semibold">{stats.active}</div>
-            </div>
-            <div className="rounded-xl border bg-slate-50 p-3 text-center">
-              <div className="text-[11px] text-slate-500">Resolved</div>
-              <div className="mt-2 text-2xl font-semibold">{stats.resolved}</div>
-            </div>
-            <div className="rounded-xl border bg-slate-50 p-3 text-center">
-              <div className="text-[11px] text-slate-500">Ignored</div>
-              <div className="mt-2 text-2xl font-semibold">{stats.ignored}</div>
-            </div>
-            <div className="rounded-xl border bg-slate-50 p-3 text-center">
-              <div className="text-[11px] text-slate-500">System Clear</div>
-              <div className="mt-2 text-2xl font-semibold">{stats.clear}</div>
-            </div>
+          <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
+            <StatCard label="Operators">{stats.total}</StatCard>
+            <StatCard label="Active Review">{stats.active}</StatCard>
+            <StatCard label="Observed Mismatch">{stats.observedMismatch}</StatCard>
+            <StatCard label="Receiving Context">{stats.receivingContext}</StatCard>
+            <StatCard label="Resolved / Ignored">
+              {stats.resolved + stats.ignored}
+            </StatCard>
           </div>
-        </section>
+        </SectionBlock>
 
         {loading && (
-          <section className="rounded-2xl bg-white border shadow-sm p-4 text-sm text-slate-600">
-            Loading assignment review...
-          </section>
+          <SectionBlock title="Assignment Review Queue">
+            <div className="text-sm text-slate-600">Loading assignment review...</div>
+          </SectionBlock>
         )}
 
         {!loading && (
-          <section className="rounded-2xl bg-white border shadow-sm p-4 space-y-4">
+          <SectionBlock
+            title="Review Queue"
+            subtitle="Resolve mismatches using assignment context first. Receiving mix is shown as supporting context, not automatic home team truth."
+          >
             <div className="flex flex-wrap items-center gap-2">
               <input
                 value={search}
@@ -456,217 +464,297 @@ export default function AssignmentReviewPage() {
               </div>
             )}
 
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1560px] text-sm">
-                <thead className="bg-slate-50 border-b">
-                  <tr className="text-left">
-                    <th className="px-4 py-3 font-semibold">Observed</th>
-                    <th className="px-3 py-3 font-semibold">Linked Employee</th>
-                    <th className="px-3 py-3 font-semibold">Current Context</th>
-                    <th className="px-3 py-3 font-semibold">Observed Signal</th>
-                    <th className="px-3 py-3 font-semibold">Why Flagged</th>
-                    <th className="px-3 py-3 font-semibold">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((row) => {
-                    const receivingMix = buildReceivingMixSummary(row.userlsTracking);
+            <div className="space-y-4">
+              {filtered.map((row) => {
+                const receivingMix = buildReceivingMixSummary(row.userlsTracking);
+                const canApplyObserved =
+                  row.identityResolved &&
+                  row.suggestedArea &&
+                  row.currentAssignedArea !== row.suggestedArea &&
+                  row.assignmentStatus === "pending";
 
-                    return (
-                      <tr key={row.userid} className="border-b last:border-b-0 align-top">
-                        <td className="px-4 py-3">
-                          <div className="font-medium">{row.observedName || row.resolvedName}</div>
-                          <div className="text-[11px] text-slate-500">{row.userid}</div>
-                        </td>
+                const canApplyHome =
+                  row.identityResolved &&
+                  row.employeeDefaultTeam &&
+                  row.currentAssignedArea !== row.employeeDefaultTeam &&
+                  row.assignmentStatus === "pending";
 
-                        <td className="px-3 py-3">
-                          {row.employeeDisplayName ? (
-                            <div>
-                              <div>{row.employeeDisplayName}</div>
-                              {row.employeeId && (
-                                <div className="text-[11px] text-slate-500">{row.employeeId}</div>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-slate-400">Unresolved</span>
-                          )}
-                        </td>
-
-                        <td className="px-3 py-3">
-                          <div className="space-y-1">
-                            <div>
-                              <span className="text-[11px] text-slate-500">Current role: </span>
-                              <span>{row.currentRole || "—"}</span>
-                            </div>
-                            <div>
-                              <span className="text-[11px] text-slate-500">Home team: </span>
-                              <span>{row.employeeDefaultTeam || "—"}</span>
-                            </div>
-                            <div>
-                              <span className="text-[11px] text-slate-500">Current day area: </span>
-                              <span>{row.currentAssignedArea || "—"}</span>
-                            </div>
-                            {row.userlsTracking?.primaryReplenishmentRole && (
-                              <div>
-                                <span className="text-[11px] text-slate-500">Observed repl role: </span>
-                                <span>
-                                  {row.userlsTracking.primaryReplenishmentRole}{" "}
-                                  <span className="text-[11px] text-slate-500">
-                                    ({pct(row.userlsTracking.primaryReplenishmentRoleShare)})
-                                  </span>
-                                </span>
-                              </div>
-                            )}
-                            {receivingMix && (
-                              <div className="text-[11px] text-slate-500">
-                                Receiving mix: {receivingMix}
-                              </div>
-                            )}
+                return (
+                  <div key={row.userid} className="rounded-2xl border bg-white p-4 shadow-sm space-y-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-base font-bold text-slate-900">
+                          {row.employeeDisplayName || row.resolvedName || row.observedName || row.userid}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {row.userid}
+                          {row.employeeId ? ` · ${row.employeeId}` : ""}
+                        </div>
+                        {row.observedName &&
+                        row.employeeDisplayName &&
+                        row.observedName !== row.employeeDisplayName ? (
+                          <div className="mt-1 text-sm text-slate-600">
+                            Observed as: {row.observedName}
                           </div>
-                        </td>
+                        ) : null}
+                      </div>
 
-                        <td className="px-3 py-3">
-                          {row.suggestedArea ? (
-                            <div className="space-y-1">
-                              <div className="font-medium">{row.suggestedArea}</div>
-                              {row.suggestedSourceArea && (
-                                <div className="text-[11px] text-slate-500">
-                                  {row.suggestedSourceArea}
-                                </div>
-                              )}
-                              {row.userlsTracking?.primaryReplenishmentAreaCode && (
-                                <div className="text-[11px] text-slate-500">
-                                  UserLS repl area: {row.userlsTracking.primaryReplenishmentAreaCode}
-                                  {" · "}
-                                  {pct(row.userlsTracking.primaryReplenishmentShare)}
-                                </div>
-                              )}
-                              {row.userlsTracking?.primaryReplenishmentRole && (
-                                <div className="text-[11px] text-slate-500">
-                                  UserLS repl role: {row.userlsTracking.primaryReplenishmentRole}
-                                </div>
-                              )}
-                              <span
-                                className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${confidenceClasses(
-                                  row.confidence
-                                )}`}
-                              >
-                                {row.confidence}
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="text-slate-400">No signal</span>
-                          )}
-                        </td>
+                      <div className={`text-xs font-medium ${statusTone(row.assignmentStatus)}`}>
+                        {statusLabel(row.assignmentStatus)}
+                        {row.reviewedAt ? ` · ${row.reviewedAt}` : ""}
+                      </div>
+                    </div>
 
-                        <td className="px-3 py-3">
-                          <div>{row.reviewReason}</div>
-                          {row.assignmentStatus === "resolved" && row.reviewedArea && (
-                            <div className="mt-1 text-[11px] text-green-700">
-                              resolved to {row.reviewedArea}
-                            </div>
-                          )}
-                          {row.assignmentStatus === "ignored" && (
-                            <div className="mt-1 text-[11px] text-slate-500">ignored</div>
-                          )}
-                        </td>
+                    <div className="flex flex-wrap gap-2">
+                      <ContextBadge variant="home-team">
+                        Home Team: {row.employeeDefaultTeam || "—"}
+                      </ContextBadge>
+                      <ContextBadge variant="observed-team">
+                        Observed Team: {row.suggestedArea || "—"}
+                      </ContextBadge>
+                      {row.userlsTracking?.primaryReplenishmentRole ? (
+                        <ContextBadge variant="observed-role">
+                          Observed Role: {row.userlsTracking.primaryReplenishmentRole}
+                        </ContextBadge>
+                      ) : null}
+                      <ContextBadge variant="review-status">
+                        Status: {statusLabel(row.assignmentStatus)}
+                      </ContextBadge>
+                      <ContextBadge variant="confidence">
+                        Confidence: {row.confidence}
+                      </ContextBadge>
+                    </div>
 
-                        <td className="px-3 py-3">
-                          <div className="flex flex-wrap gap-2">
-                            {!row.identityResolved && (
-                              <Link
-                                href="/options/identity-review"
-                                className="rounded-lg border bg-white px-3 py-2 text-xs hover:bg-slate-50"
-                              >
-                                Identity Review
-                              </Link>
-                            )}
+                    <div className="rounded-xl border bg-slate-50 px-3 py-3">
+                      <div className="text-sm font-medium text-slate-900">{row.reviewReason}</div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600">
+                        <span>Current Role: {row.currentRole || "—"}</span>
+                        <span>Current Day Area: {row.currentAssignedArea || "—"}</span>
+                        {row.suggestedSourceArea ? <span>Signal Source: {row.suggestedSourceArea}</span> : null}
+                      </div>
+                      {row.assignmentStatus === "resolved" && row.reviewedArea ? (
+                        <div className="mt-2 text-xs text-green-700">
+                          Resolved to {row.reviewedArea}
+                        </div>
+                      ) : null}
+                      {row.assignmentStatus === "ignored" ? (
+                        <div className="mt-2 text-xs text-slate-500">This item is currently ignored.</div>
+                      ) : null}
+                    </div>
 
-                            {row.identityResolved &&
-                              row.suggestedArea &&
-                              row.currentAssignedArea !== row.suggestedArea &&
-                              row.assignmentStatus === "pending" && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    applyAssignedArea(row.userid, row.suggestedArea as string, "Observed team")
-                                  }
-                                  disabled={savingUser === row.userid}
-                                  className="rounded-lg border bg-white px-3 py-2 text-xs hover:bg-slate-50 disabled:opacity-60"
-                                >
-                                  Set Day to Observed Team
-                                </button>
-                              )}
+                    <div className="flex flex-wrap gap-2">
+                      {row.userlsTracking?.primaryReplenishmentAreaCode ? (
+                        <ContextBadge variant="context">
+                          UserLS Repl Area: {row.userlsTracking.primaryReplenishmentAreaCode} · {pct(row.userlsTracking.primaryReplenishmentShare)}
+                        </ContextBadge>
+                      ) : null}
+                      {row.userlsTracking?.primaryReplenishmentRole ? (
+                        <ContextBadge variant="context">
+                          Role Share: {pct(row.userlsTracking.primaryReplenishmentRoleShare)}
+                        </ContextBadge>
+                      ) : null}
+                      {receivingMix ? (
+                        <ContextBadge variant="context">
+                          Receiving Mix: {receivingMix}
+                        </ContextBadge>
+                      ) : null}
+                    </div>
 
-                            {row.identityResolved &&
-                              row.employeeDefaultTeam &&
-                              row.currentAssignedArea !== row.employeeDefaultTeam &&
-                              row.assignmentStatus === "pending" && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    applyAssignedArea(
-                                      row.userid,
-                                      row.employeeDefaultTeam as string,
-                                      "Employee home team"
-                                    )
-                                  }
-                                  disabled={savingUser === row.userid}
-                                  className="rounded-lg border bg-white px-3 py-2 text-xs hover:bg-slate-50 disabled:opacity-60"
-                                >
-                                  Set Day to Home Team
-                                </button>
-                              )}
+                    <div className="flex flex-wrap gap-2">
+                      {!row.identityResolved && (
+                        <Link
+                          href="/options/identity-review"
+                          className="rounded-lg border bg-white px-3 py-2 text-xs hover:bg-slate-50"
+                        >
+                          Identity Review
+                        </Link>
+                      )}
 
-                            {row.currentAssignedArea === row.suggestedArea && row.suggestedArea && (
-                              <span className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
-                                Already on observed team
-                              </span>
-                            )}
+                      {canApplyObserved && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            applyAssignedArea(row.userid, row.suggestedArea as string, "Observed team")
+                          }
+                          disabled={savingUser === row.userid}
+                          className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-60"
+                        >
+                          Set Day to Observed Team
+                        </button>
+                      )}
 
-                            {row.currentAssignedArea === row.employeeDefaultTeam && row.employeeDefaultTeam && (
-                              <span className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
-                                Already on home team
-                              </span>
-                            )}
+                      {canApplyHome && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            applyAssignedArea(
+                              row.userid,
+                              row.employeeDefaultTeam as string,
+                              "Employee home team"
+                            )
+                          }
+                          disabled={savingUser === row.userid}
+                          className="rounded-lg border bg-white px-3 py-2 text-xs hover:bg-slate-50 disabled:opacity-60"
+                        >
+                          Set Day to Home Team
+                        </button>
+                      )}
 
-                            {row.assignmentStatus === "pending" && row.needsReview && (
-                              <button
-                                type="button"
-                                onClick={() => markStatus(row.userid, "ignored")}
-                                disabled={savingUser === row.userid}
-                                className="rounded-lg border bg-white px-3 py-2 text-xs hover:bg-slate-50 disabled:opacity-60"
-                              >
-                                Ignore
-                              </button>
-                            )}
+                      {row.currentAssignedArea === row.suggestedArea && row.suggestedArea && (
+                        <span className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">
+                          Already on observed team
+                        </span>
+                      )}
 
-                            {row.assignmentStatus !== "pending" && (
-                              <button
-                                type="button"
-                                onClick={() => markStatus(row.userid, "pending")}
-                                disabled={savingUser === row.userid}
-                                className="rounded-lg border bg-white px-3 py-2 text-xs hover:bg-slate-50 disabled:opacity-60"
-                              >
-                                Reopen
-                              </button>
-                            )}
+                      {row.currentAssignedArea === row.employeeDefaultTeam && row.employeeDefaultTeam && (
+                        <span className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                          Already on home team
+                        </span>
+                      )}
 
-                            <Link
-                              href={`/operators/${row.userid}`}
-                              className="rounded-lg border bg-white px-3 py-2 text-xs hover:bg-slate-50"
-                            >
-                              Operator Detail
-                            </Link>
+                      {row.assignmentStatus === "pending" && row.needsReview && (
+                        <button
+                          type="button"
+                          onClick={() => markStatus(row.userid, "ignored")}
+                          disabled={savingUser === row.userid}
+                          className="rounded-lg border bg-white px-3 py-2 text-xs hover:bg-slate-50 disabled:opacity-60"
+                        >
+                          Ignore
+                        </button>
+                      )}
+
+                      {row.assignmentStatus !== "pending" && (
+                        <button
+                          type="button"
+                          onClick={() => markStatus(row.userid, "pending")}
+                          disabled={savingUser === row.userid}
+                          className="rounded-lg border bg-white px-3 py-2 text-xs hover:bg-slate-50 disabled:opacity-60"
+                        >
+                          Reopen
+                        </button>
+                      )}
+
+                      <Link
+                        href={`/operators/${row.userid}`}
+                        className="rounded-lg border bg-white px-3 py-2 text-xs hover:bg-slate-50"
+                      >
+                        Operator Detail
+                      </Link>
+                    </div>
+
+                    <DetailDisclosure
+                      title="Audit Detail"
+                      meta={[
+                        row.employeeDisplayName ? `employee ${row.employeeDisplayName}` : "unresolved identity",
+                        row.userlsTracking?.primaryReplenishmentRole
+                          ? `role ${row.userlsTracking.primaryReplenishmentRole}`
+                          : null,
+                        receivingMix ? "receiving context present" : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    >
+                      <div className="grid gap-4 xl:grid-cols-2">
+                        <div className="space-y-2 text-sm">
+                          <div>
+                            <span className="text-slate-500">Observed Name: </span>
+                            <span>{row.observedName || "—"}</span>
                           </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          <div>
+                            <span className="text-slate-500">Resolved Name: </span>
+                            <span>{row.resolvedName || "—"}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Employee Display: </span>
+                            <span>{row.employeeDisplayName || "—"}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Employee ID: </span>
+                            <span>{row.employeeId || "—"}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Identity Resolved: </span>
+                            <span>{row.identityResolved ? "Yes" : "No"}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Review Reason: </span>
+                            <span>{row.reviewReason}</span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 text-sm">
+                          <div>
+                            <span className="text-slate-500">Current Role: </span>
+                            <span>{row.currentRole || "—"}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Home Team: </span>
+                            <span>{row.employeeDefaultTeam || "—"}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Current Assigned Area: </span>
+                            <span>{row.currentAssignedArea || "—"}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Suggested Area: </span>
+                            <span>{row.suggestedArea || "—"}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Suggested Source Area: </span>
+                            <span>{row.suggestedSourceArea || "—"}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Confidence: </span>
+                            <span>{row.confidence}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {(row.userlsTracking?.present || receivingMix) && (
+                        <div className="mt-4 rounded-xl border bg-slate-50 p-3 text-sm space-y-2">
+                          <div className="font-medium text-slate-900">UserLS Context</div>
+                          <div>
+                            <span className="text-slate-500">Receiving Plates: </span>
+                            <span>{fmt(row.userlsTracking?.receivingPlates)}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Receiving Pieces: </span>
+                            <span>{fmt(row.userlsTracking?.receivingPieces)}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Repl Plates: </span>
+                            <span>{fmt(row.userlsTracking?.replenishmentNoRecvPlates)}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Repl Pieces: </span>
+                            <span>{fmt(row.userlsTracking?.replenishmentNoRecvPieces)}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Primary Repl Area: </span>
+                            <span>{row.userlsTracking?.primaryReplenishmentAreaCode || "—"}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Primary Repl Role: </span>
+                            <span>{row.userlsTracking?.primaryReplenishmentRole || "—"}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">Receiving Mix: </span>
+                            <span>{receivingMix || "—"}</span>
+                          </div>
+                        </div>
+                      )}
+                    </DetailDisclosure>
+                  </div>
+                );
+              })}
+
+              {!filtered.length && (
+                <div className="rounded-2xl border bg-white p-6 text-sm text-slate-500 shadow-sm">
+                  No assignment review rows match the current filters.
+                </div>
+              )}
             </div>
-          </section>
+          </SectionBlock>
         )}
       </div>
     </main>

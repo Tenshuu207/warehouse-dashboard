@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useAppState } from "@/lib/app-state";
+import ContextBadge from "@/components/shared/ContextBadge";
+import DetailDisclosure from "@/components/shared/DetailDisclosure";
+import SectionBlock from "@/components/shared/SectionBlock";
+import StatCard from "@/components/shared/StatCard";
 
 type AreaBucket = {
   areaCode?: string | null;
@@ -128,7 +132,15 @@ type ApiResponse = {
   }) | null;
 };
 
-function fmt(value: number | null | undefined, digits = 2) {
+function fmt(value: number | null | undefined, digits = 0) {
+  if (value === null || value === undefined) return "—";
+  return Number(value).toLocaleString("en-US", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+function fmtPrecise(value: number | null | undefined, digits = 2) {
   if (value === null || value === undefined) return "—";
   return Number(value).toFixed(digits);
 }
@@ -143,6 +155,14 @@ function share(part: number | null | undefined, total: number | null | undefined
     return null;
   }
   return Number(part) / Number(total);
+}
+
+function confidenceLabel(value: number | null | undefined) {
+  if (value === null || value === undefined) return "Unknown";
+  if (value >= 0.75) return "High";
+  if (value >= 0.5) return "Medium";
+  if (value > 0) return "Low";
+  return "Unknown";
 }
 
 function deltaBadge(value: number | null | undefined) {
@@ -161,24 +181,6 @@ function deltaBadge(value: number | null | undefined) {
     <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${color}`}>
       Δ {value}
     </span>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  helper,
-}: {
-  label: string;
-  value: string;
-  helper?: string;
-}) {
-  return (
-    <div className="rounded-xl border bg-slate-50 p-3">
-      <div className="text-[11px] text-slate-500">{label}</div>
-      <div className="mt-1 text-xl font-semibold">{value}</div>
-      {helper && <div className="mt-1 text-[11px] text-slate-500">{helper}</div>}
-    </div>
   );
 }
 
@@ -241,19 +243,23 @@ export default function OperatorUserlsTracking() {
 
   if (loading) {
     return (
-      <section className="rounded-2xl bg-white border shadow-sm p-4">
-        <h3 className="text-lg font-bold">UserLS Tracking</h3>
-        <p className="mt-1 text-sm text-slate-500">Loading supplemental transaction tracking…</p>
-      </section>
+      <SectionBlock
+        title="Observed Work Summary"
+        subtitle="UserLS-derived activity, observed area context, and role inference."
+      >
+        <div className="text-sm text-slate-500">Loading supplemental transaction tracking...</div>
+      </SectionBlock>
     );
   }
 
   if (error) {
     return (
-      <section className="rounded-2xl bg-white border shadow-sm p-4">
-        <h3 className="text-lg font-bold">UserLS Tracking</h3>
-        <p className="mt-1 text-sm text-red-600">{error}</p>
-      </section>
+      <SectionBlock
+        title="Observed Work Summary"
+        subtitle="UserLS-derived activity, observed area context, and role inference."
+      >
+        <div className="text-sm text-red-600">{error}</div>
+      </SectionBlock>
     );
   }
 
@@ -262,12 +268,14 @@ export default function OperatorUserlsTracking() {
 
   if (!tracking?.present) {
     return (
-      <section className="rounded-2xl bg-white border shadow-sm p-4">
-        <h3 className="text-lg font-bold">UserLS Tracking</h3>
-        <p className="mt-1 text-sm text-slate-500">
+      <SectionBlock
+        title="Observed Work Summary"
+        subtitle="UserLS-derived activity, observed area context, and role inference."
+      >
+        <div className="text-sm text-slate-500">
           No supplemental UserLS tracking is available for this operator on {selectedWeek}.
-        </p>
-      </section>
+        </div>
+      </SectionBlock>
     );
   }
 
@@ -303,228 +311,288 @@ export default function OperatorUserlsTracking() {
         Number(b.replenishmentNoRecvPlates || 0) - Number(a.replenishmentNoRecvPlates || 0)
     );
 
+  const inferredConfidence = confidenceLabel(
+    tracking.primaryReplenishmentRoleShare ?? tracking.primaryReplenishmentShare
+  );
+
   return (
-    <section className="rounded-2xl bg-white border shadow-sm p-4 space-y-4">
-      <div>
-        <h3 className="text-lg font-bold">UserLS Tracking</h3>
-        <p className="mt-1 text-sm text-slate-500">
-          Supplemental operator activity from RF2 USERLS. Pick stays separate from receiving and replenishment.
-        </p>
+    <SectionBlock
+      title="Observed Work Summary"
+      subtitle="UserLS-derived activity, observed area context, and role inference. Pick stays separate from receiving and replenishment."
+    >
+      <div className="flex flex-wrap gap-2">
+        {tracking.primaryReplenishmentAreaCode ? (
+          <ContextBadge variant="observed-team">
+            Observed Repl Area: {tracking.primaryReplenishmentAreaCode}
+          </ContextBadge>
+        ) : null}
+
+        {tracking.primaryReplenishmentRole ? (
+          <ContextBadge variant="observed-role">
+            Observed Role: {tracking.primaryReplenishmentRole}
+          </ContextBadge>
+        ) : null}
+
+        {tracking.primaryActivityAreaCode ? (
+          <ContextBadge variant="context">
+            Primary Activity Area: {tracking.primaryActivityAreaCode}
+          </ContextBadge>
+        ) : null}
+
+        <ContextBadge variant="confidence">
+          Confidence: {inferredConfidence}
+        </ContextBadge>
       </div>
 
-      <div>
-        <h4 className="text-sm font-semibold text-slate-800">Pick Activity</h4>
-        <div className="mt-2 grid grid-cols-2 xl:grid-cols-5 gap-3">
-          <MetricCard label="Pick Plates" value={fmt(tracking.pickPlates ?? 0, 0)} />
-          <MetricCard label="Pick Pieces" value={fmt(tracking.pickPieces ?? 0, 0)} />
-          <MetricCard label="Pick Routes" value={fmt(tracking.pickRouteCount ?? 0, 0)} />
-          <MetricCard label="Pick Minutes" value={fmt(tracking.pickMinutes ?? 0, 0)} />
-          <MetricCard
-            label="Pick Pieces from Route Totals"
-            value={fmt(tracking.pickPiecesFromRouteTotals ?? 0, 0)}
-          />
-        </div>
-
-        <div className="mt-3 grid grid-cols-1 xl:grid-cols-3 gap-3">
-          <MetricCard
-            label="Reported Pick Rate (pieces/hour)"
-            value={fmt(tracking.pickRateReportedAverage, 2)}
-            helper="Average of route-reported rates from the source report"
-          />
-          <MetricCard
-            label="Weighted Pick Rate (pieces/hour)"
-            value={fmt(tracking.pickRateReportedWeighted, 2)}
-            helper="Minutes-weighted route-reported rate"
-          />
-          <MetricCard
-            label="Derived Pick Pace (pieces/min)"
-            value={fmt(tracking.pickRateDerivedPiecesPerMinute, 4)}
-            helper={`Overall benchmark: ${fmt(
-              data?.userlsTrackingSummary?.summary?.pickRateDerivedPiecesPerMinuteOverall,
-              4
-            )} pieces/min`}
-          />
-        </div>
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        <StatCard label="Repl Plates">{fmt(tracking.replenishmentNoRecvPlates)}</StatCard>
+        <StatCard label="Repl Pieces">{fmt(tracking.replenishmentNoRecvPieces)}</StatCard>
+        <StatCard label="Receiving Plates">{fmt(tracking.receivingPlates)}</StatCard>
+        <StatCard label="Receiving Pieces">{fmt(tracking.receivingPieces)}</StatCard>
       </div>
 
-      <div>
-        <h4 className="text-sm font-semibold text-slate-800">Receiving and Replenishment</h4>
-        <div className="mt-2 overflow-x-auto">
-          <table className="w-full min-w-[860px] text-sm">
-            <thead className="bg-slate-50 border-b">
-              <tr className="text-left">
-                <th className="px-3 py-2 font-semibold">Bucket</th>
-                <th className="px-3 py-2 font-semibold">Plates</th>
-                <th className="px-3 py-2 font-semibold">Pieces</th>
-                <th className="px-3 py-2 font-semibold">Delta</th>
-                <th className="px-3 py-2 font-semibold">Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="border-b">
-                <td className="px-3 py-2 font-medium">Receiving</td>
-                <td className="px-3 py-2">{fmt(tracking.receivingPlates ?? 0, 0)}</td>
-                <td className="px-3 py-2">{fmt(tracking.receivingPieces ?? 0, 0)}</td>
-                <td className="px-3 py-2">
-                  <div className="flex gap-2 flex-wrap">
-                    {deltaBadge(tracking.deltas?.receivingPlates)}
-                    {deltaBadge(tracking.deltas?.receivingPieces)}
-                  </div>
-                </td>
-                <td className="px-3 py-2 text-slate-500">Compared against current daily receiving totals</td>
-              </tr>
-              <tr className="border-b">
-                <td className="px-3 py-2 font-medium">Replenishment No-Recv</td>
-                <td className="px-3 py-2">{fmt(tracking.replenishmentNoRecvPlates ?? 0, 0)}</td>
-                <td className="px-3 py-2">{fmt(tracking.replenishmentNoRecvPieces ?? 0, 0)}</td>
-                <td className="px-3 py-2">
-                  <div className="flex gap-2 flex-wrap">
-                    {deltaBadge(tracking.deltas?.replenishmentNoRecvPlates)}
-                    {deltaBadge(tracking.deltas?.replenishmentNoRecvPieces)}
-                  </div>
-                </td>
-                <td className="px-3 py-2 text-slate-500">Letdown + putaway + restock-like estimated</td>
-              </tr>
-              <tr className="border-b">
-                <td className="px-3 py-2 font-medium">Letdown</td>
-                <td className="px-3 py-2">{fmt(tracking.letdownPlates ?? 0, 0)}</td>
-                <td className="px-3 py-2">{fmt(tracking.letdownPieces ?? 0, 0)}</td>
-                <td className="px-3 py-2">{deltaBadge(tracking.deltas?.letdownPlates)}</td>
-                <td className="px-3 py-2 text-slate-500">Compared against current daily letdown plates</td>
-              </tr>
-              <tr className="border-b">
-                <td className="px-3 py-2 font-medium">Putaway</td>
-                <td className="px-3 py-2">{fmt(tracking.putawayPlates ?? 0, 0)}</td>
-                <td className="px-3 py-2">{fmt(tracking.putawayPieces ?? 0, 0)}</td>
-                <td className="px-3 py-2">{deltaBadge(tracking.deltas?.putawayPlates)}</td>
-                <td className="px-3 py-2 text-slate-500">Compared against current daily putaway plates</td>
-              </tr>
-              <tr className="border-b">
-                <td className="px-3 py-2 font-medium">Restock-Like Estimated</td>
-                <td className="px-3 py-2">{fmt(tracking.restockLikePlatesEstimated ?? 0, 0)}</td>
-                <td className="px-3 py-2">{fmt(tracking.restockLikePiecesEstimated ?? 0, 0)}</td>
-                <td className="px-3 py-2">{deltaBadge(tracking.deltas?.restockLikeEstimatedPlates)}</td>
-                <td className="px-3 py-2 text-slate-500">Restock + paired MoveFrom/MoveTo estimate</td>
-              </tr>
-              <tr>
-                <td className="px-3 py-2 font-medium">Other Non-Pick</td>
-                <td className="px-3 py-2">{fmt(tracking.otherNonPickPlates ?? 0, 0)}</td>
-                <td className="px-3 py-2">{fmt(tracking.otherNonPickPieces ?? 0, 0)}</td>
-                <td className="px-3 py-2 text-slate-400">—</td>
-                <td className="px-3 py-2 text-slate-500">Residual non-pick activity not classified into main buckets</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        <StatCard label="Letdown Plates">{fmt(tracking.letdownPlates)}</StatCard>
+        <StatCard label="Putaway Plates">{fmt(tracking.putawayPlates)}</StatCard>
+        <StatCard label="Restock-Like">{fmt(tracking.restockLikePlatesEstimated)}</StatCard>
+        <StatCard label="Pick Plates">{fmt(tracking.pickPlates)}</StatCard>
       </div>
 
-      <div>
-        <h4 className="text-sm font-semibold text-slate-800">Observed Role and Area</h4>
-        <div className="mt-2 grid grid-cols-1 xl:grid-cols-4 gap-3">
-          <MetricCard
-            label="Primary Replenishment Role"
-            value={tracking.primaryReplenishmentRole || "—"}
-            helper={`Share of replenishment plates: ${pct(tracking.primaryReplenishmentRoleShare)}`}
-          />
-          <MetricCard
-            label="Primary Replenishment Area"
-            value={tracking.primaryReplenishmentAreaCode || "—"}
-            helper={`Share of replenishment plates: ${pct(tracking.primaryReplenishmentShare)}`}
-          />
-          <MetricCard
-            label="Primary Activity Area"
-            value={tracking.primaryActivityAreaCode || "—"}
-            helper={`Share of non-pick activity: ${pct(tracking.primaryActivityShare)}`}
-          />
-          <MetricCard
-            label="Receiving Pieces"
-            value={fmt(tracking.receivingPieces ?? 0, 0)}
-            helper="Use area mix below as destination context, not automatic home team"
-          />
-        </div>
+      <div className="rounded-xl border bg-slate-50 p-3 text-sm text-slate-700">
+        Receiving destination mix and area distribution are supporting context. Use the observed replenishment role and primary activity patterns as operational signals, not blind permanent assignment truth.
       </div>
 
-      <div>
-        <h4 className="text-sm font-semibold text-slate-800">Role Mix</h4>
-        <div className="mt-2 overflow-x-auto">
-          <table className="w-full min-w-[980px] text-sm">
-            <thead className="bg-slate-50 border-b">
-              <tr className="text-left">
-                <th className="px-3 py-2 font-semibold">Role</th>
-                <th className="px-3 py-2 font-semibold">Repl Plates</th>
-                <th className="px-3 py-2 font-semibold">Repl Pieces</th>
-                <th className="px-3 py-2 font-semibold">Repl Share</th>
-                <th className="px-3 py-2 font-semibold">Letdown</th>
-                <th className="px-3 py-2 font-semibold">Putaway</th>
-                <th className="px-3 py-2 font-semibold">Restock-Like</th>
-                <th className="px-3 py-2 font-semibold">Pick Plates</th>
-                <th className="px-3 py-2 font-semibold">Other Non-Pick</th>
-              </tr>
-            </thead>
-            <tbody>
-              {roleBuckets.length === 0 ? (
-                <tr>
-                  <td className="px-3 py-3 text-slate-500" colSpan={9}>
-                    No observed role-zone mix available from mapped bins for this operator.
-                  </td>
-                </tr>
-              ) : (
-                roleBuckets.map((bucket) => (
-                  <tr key={`role-${bucket.role}`} className="border-b last:border-b-0">
-                    <td className="px-3 py-2 font-medium">{bucket.role || "—"}</td>
-                    <td className="px-3 py-2">{fmt(bucket.replenishmentNoRecvPlates ?? 0, 0)}</td>
-                    <td className="px-3 py-2">{fmt(bucket.replenishmentNoRecvPieces ?? 0, 0)}</td>
-                    <td className="px-3 py-2">{pct(bucket.replenishmentPlateShare)}</td>
-                    <td className="px-3 py-2">{fmt(bucket.letdownPlates ?? 0, 0)}</td>
-                    <td className="px-3 py-2">{fmt(bucket.putawayPlates ?? 0, 0)}</td>
-                    <td className="px-3 py-2">{fmt(bucket.restockLikePlatesEstimated ?? 0, 0)}</td>
-                    <td className="px-3 py-2">{fmt(bucket.pickPlates ?? 0, 0)}</td>
-                    <td className="px-3 py-2">{fmt(bucket.otherNonPickPlates ?? 0, 0)}</td>
+      <DetailDisclosure
+        title="Supporting Activity Detail"
+        meta={`${areaBuckets.length} area buckets · ${roleBuckets.length} role buckets`}
+      >
+        <div className="space-y-6">
+          <div>
+            <h4 className="text-sm font-semibold text-slate-800">Pick Activity</h4>
+            <div className="mt-2 grid grid-cols-2 xl:grid-cols-5 gap-3">
+              <StatCard label="Pick Plates">{fmt(tracking.pickPlates)}</StatCard>
+              <StatCard label="Pick Pieces">{fmt(tracking.pickPieces)}</StatCard>
+              <StatCard label="Pick Routes">{fmt(tracking.pickRouteCount)}</StatCard>
+              <StatCard label="Pick Minutes">{fmt(tracking.pickMinutes)}</StatCard>
+              <StatCard label="Route Total Pieces">{fmt(tracking.pickPiecesFromRouteTotals)}</StatCard>
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 xl:grid-cols-3 gap-3">
+              <StatCard label="Reported Pick Rate">
+                {fmtPrecise(tracking.pickRateReportedAverage, 2)}
+              </StatCard>
+              <StatCard label="Weighted Pick Rate">
+                {fmtPrecise(tracking.pickRateReportedWeighted, 2)}
+              </StatCard>
+              <StatCard label="Derived Pick Pace">
+                {fmtPrecise(tracking.pickRateDerivedPiecesPerMinute, 4)}
+              </StatCard>
+            </div>
+
+            <div className="mt-2 text-xs text-slate-500">
+              Overall benchmark:{" "}
+              {fmtPrecise(
+                data?.userlsTrackingSummary?.summary?.pickRateDerivedPiecesPerMinuteOverall,
+                4
+              )}{" "}
+              pieces/min
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-sm font-semibold text-slate-800">Daily Match Check</h4>
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full min-w-[860px] text-sm">
+                <thead className="border-b bg-slate-50">
+                  <tr className="text-left">
+                    <th className="px-3 py-2 font-semibold">Bucket</th>
+                    <th className="px-3 py-2 font-semibold">Plates</th>
+                    <th className="px-3 py-2 font-semibold">Pieces</th>
+                    <th className="px-3 py-2 font-semibold">Delta</th>
+                    <th className="px-3 py-2 font-semibold">Notes</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                </thead>
+                <tbody>
+                  <tr className="border-b">
+                    <td className="px-3 py-2 font-medium">Receiving</td>
+                    <td className="px-3 py-2">{fmt(tracking.receivingPlates)}</td>
+                    <td className="px-3 py-2">{fmt(tracking.receivingPieces)}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-2">
+                        {deltaBadge(tracking.deltas?.receivingPlates)}
+                        {deltaBadge(tracking.deltas?.receivingPieces)}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-slate-500">
+                      Compared against current daily receiving totals
+                    </td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="px-3 py-2 font-medium">Replenishment No-Recv</td>
+                    <td className="px-3 py-2">{fmt(tracking.replenishmentNoRecvPlates)}</td>
+                    <td className="px-3 py-2">{fmt(tracking.replenishmentNoRecvPieces)}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-2">
+                        {deltaBadge(tracking.deltas?.replenishmentNoRecvPlates)}
+                        {deltaBadge(tracking.deltas?.replenishmentNoRecvPieces)}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-slate-500">
+                      Letdown + putaway + restock-like estimated
+                    </td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="px-3 py-2 font-medium">Letdown</td>
+                    <td className="px-3 py-2">{fmt(tracking.letdownPlates)}</td>
+                    <td className="px-3 py-2">{fmt(tracking.letdownPieces)}</td>
+                    <td className="px-3 py-2">{deltaBadge(tracking.deltas?.letdownPlates)}</td>
+                    <td className="px-3 py-2 text-slate-500">
+                      Compared against current daily letdown plates
+                    </td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="px-3 py-2 font-medium">Putaway</td>
+                    <td className="px-3 py-2">{fmt(tracking.putawayPlates)}</td>
+                    <td className="px-3 py-2">{fmt(tracking.putawayPieces)}</td>
+                    <td className="px-3 py-2">{deltaBadge(tracking.deltas?.putawayPlates)}</td>
+                    <td className="px-3 py-2 text-slate-500">
+                      Compared against current daily putaway plates
+                    </td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="px-3 py-2 font-medium">Restock-Like Estimated</td>
+                    <td className="px-3 py-2">{fmt(tracking.restockLikePlatesEstimated)}</td>
+                    <td className="px-3 py-2">{fmt(tracking.restockLikePiecesEstimated)}</td>
+                    <td className="px-3 py-2">
+                      {deltaBadge(tracking.deltas?.restockLikeEstimatedPlates)}
+                    </td>
+                    <td className="px-3 py-2 text-slate-500">
+                      Restock + paired MoveFrom/MoveTo estimate
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="px-3 py-2 font-medium">Other Non-Pick</td>
+                    <td className="px-3 py-2">{fmt(tracking.otherNonPickPlates)}</td>
+                    <td className="px-3 py-2">{fmt(tracking.otherNonPickPieces)}</td>
+                    <td className="px-3 py-2 text-slate-400">—</td>
+                    <td className="px-3 py-2 text-slate-500">
+                      Residual non-pick activity not classified into main buckets
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
 
-      <div>
-        <h4 className="text-sm font-semibold text-slate-800">Area Mix</h4>
-        <div className="mt-2 overflow-x-auto">
-          <table className="w-full min-w-[1200px] text-sm">
-            <thead className="bg-slate-50 border-b">
-              <tr className="text-left">
-                <th className="px-3 py-2 font-semibold">Area</th>
-                <th className="px-3 py-2 font-semibold">Recv Plates</th>
-                <th className="px-3 py-2 font-semibold">Recv Pieces</th>
-                <th className="px-3 py-2 font-semibold">Recv Piece Share</th>
-                <th className="px-3 py-2 font-semibold">Repl Plates</th>
-                <th className="px-3 py-2 font-semibold">Repl Pieces</th>
-                <th className="px-3 py-2 font-semibold">Repl Share</th>
-                <th className="px-3 py-2 font-semibold">Pick Plates</th>
-                <th className="px-3 py-2 font-semibold">Pick Pieces</th>
-                <th className="px-3 py-2 font-semibold">Other Non-Pick</th>
-              </tr>
-            </thead>
-            <tbody>
-              {areaBuckets.map((bucket) => (
-                <tr key={`area-${bucket.areaCode}`} className="border-b last:border-b-0">
-                  <td className="px-3 py-2 font-medium">{bucket.areaCode || "—"}</td>
-                  <td className="px-3 py-2">{fmt(bucket.receivingPlates ?? 0, 0)}</td>
-                  <td className="px-3 py-2">{fmt(bucket.receivingPieces ?? 0, 0)}</td>
-                  <td className="px-3 py-2">{pct(bucket.receivingPieceShare)}</td>
-                  <td className="px-3 py-2">{fmt(bucket.replenishmentNoRecvPlates ?? 0, 0)}</td>
-                  <td className="px-3 py-2">{fmt(bucket.replenishmentNoRecvPieces ?? 0, 0)}</td>
-                  <td className="px-3 py-2">{pct(bucket.replenishmentPlateShare)}</td>
-                  <td className="px-3 py-2">{fmt(bucket.pickPlates ?? 0, 0)}</td>
-                  <td className="px-3 py-2">{fmt(bucket.pickPieces ?? 0, 0)}</td>
-                  <td className="px-3 py-2">{fmt(bucket.otherNonPickPlates ?? 0, 0)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div>
+            <h4 className="text-sm font-semibold text-slate-800">Observed Role and Area</h4>
+            <div className="mt-2 grid grid-cols-1 xl:grid-cols-4 gap-3">
+              <StatCard label="Primary Repl Role">
+                {tracking.primaryReplenishmentRole || "—"}
+              </StatCard>
+              <StatCard label="Role Share">
+                {pct(tracking.primaryReplenishmentRoleShare)}
+              </StatCard>
+              <StatCard label="Primary Repl Area">
+                {tracking.primaryReplenishmentAreaCode || "—"}
+              </StatCard>
+              <StatCard label="Primary Activity Area">
+                {tracking.primaryActivityAreaCode || "—"}
+              </StatCard>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-sm font-semibold text-slate-800">Role Mix</h4>
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full min-w-[980px] text-sm">
+                <thead className="border-b bg-slate-50">
+                  <tr className="text-left">
+                    <th className="px-3 py-2 font-semibold">Role</th>
+                    <th className="px-3 py-2 font-semibold">Repl Plates</th>
+                    <th className="px-3 py-2 font-semibold">Repl Pieces</th>
+                    <th className="px-3 py-2 font-semibold">Repl Share</th>
+                    <th className="px-3 py-2 font-semibold">Letdown</th>
+                    <th className="px-3 py-2 font-semibold">Putaway</th>
+                    <th className="px-3 py-2 font-semibold">Restock-Like</th>
+                    <th className="px-3 py-2 font-semibold">Pick Plates</th>
+                    <th className="px-3 py-2 font-semibold">Other Non-Pick</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {roleBuckets.length === 0 ? (
+                    <tr>
+                      <td className="px-3 py-3 text-slate-500" colSpan={9}>
+                        No observed role-zone mix available from mapped bins for this operator.
+                      </td>
+                    </tr>
+                  ) : (
+                    roleBuckets.map((bucket) => (
+                      <tr key={`role-${bucket.role}`} className="border-b last:border-b-0">
+                        <td className="px-3 py-2 font-medium">{bucket.role || "—"}</td>
+                        <td className="px-3 py-2">{fmt(bucket.replenishmentNoRecvPlates)}</td>
+                        <td className="px-3 py-2">{fmt(bucket.replenishmentNoRecvPieces)}</td>
+                        <td className="px-3 py-2">{pct(bucket.replenishmentPlateShare)}</td>
+                        <td className="px-3 py-2">{fmt(bucket.letdownPlates)}</td>
+                        <td className="px-3 py-2">{fmt(bucket.putawayPlates)}</td>
+                        <td className="px-3 py-2">{fmt(bucket.restockLikePlatesEstimated)}</td>
+                        <td className="px-3 py-2">{fmt(bucket.pickPlates)}</td>
+                        <td className="px-3 py-2">{fmt(bucket.otherNonPickPlates)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-sm font-semibold text-slate-800">Area Mix</h4>
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full min-w-[1200px] text-sm">
+                <thead className="border-b bg-slate-50">
+                  <tr className="text-left">
+                    <th className="px-3 py-2 font-semibold">Area</th>
+                    <th className="px-3 py-2 font-semibold">Recv Plates</th>
+                    <th className="px-3 py-2 font-semibold">Recv Pieces</th>
+                    <th className="px-3 py-2 font-semibold">Recv Piece Share</th>
+                    <th className="px-3 py-2 font-semibold">Repl Plates</th>
+                    <th className="px-3 py-2 font-semibold">Repl Pieces</th>
+                    <th className="px-3 py-2 font-semibold">Repl Share</th>
+                    <th className="px-3 py-2 font-semibold">Pick Plates</th>
+                    <th className="px-3 py-2 font-semibold">Pick Pieces</th>
+                    <th className="px-3 py-2 font-semibold">Other Non-Pick</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {areaBuckets.length === 0 ? (
+                    <tr>
+                      <td className="px-3 py-3 text-slate-500" colSpan={10}>
+                        No area mix is available for this operator.
+                      </td>
+                    </tr>
+                  ) : (
+                    areaBuckets.map((bucket) => (
+                      <tr key={`area-${bucket.areaCode}`} className="border-b last:border-b-0">
+                        <td className="px-3 py-2 font-medium">{bucket.areaCode || "—"}</td>
+                        <td className="px-3 py-2">{fmt(bucket.receivingPlates)}</td>
+                        <td className="px-3 py-2">{fmt(bucket.receivingPieces)}</td>
+                        <td className="px-3 py-2">{pct(bucket.receivingPieceShare)}</td>
+                        <td className="px-3 py-2">{fmt(bucket.replenishmentNoRecvPlates)}</td>
+                        <td className="px-3 py-2">{fmt(bucket.replenishmentNoRecvPieces)}</td>
+                        <td className="px-3 py-2">{pct(bucket.replenishmentPlateShare)}</td>
+                        <td className="px-3 py-2">{fmt(bucket.pickPlates)}</td>
+                        <td className="px-3 py-2">{fmt(bucket.pickPieces)}</td>
+                        <td className="px-3 py-2">{fmt(bucket.otherNonPickPlates)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-      </div>
-    </section>
+      </DetailDisclosure>
+    </SectionBlock>
   );
 }

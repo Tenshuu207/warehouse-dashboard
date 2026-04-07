@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/lib/app-state";
+import PageHeader from "./shared/PageHeader";
+import StatCard from "./shared/StatCard";
 
 type TeamGroupsResponse = {
   date: string;
@@ -130,30 +132,16 @@ export default function PerformanceEnrichedCore() {
 
   return (
     <section className="rounded-2xl bg-white border shadow-sm p-4 space-y-4">
-      <div>
-        <h3 className="text-lg font-bold">Performance Core (Enriched)</h3>
-        <p className="mt-1 text-sm text-slate-500">
-          Main performance snapshot from enriched team and observed role grouping.
-        </p>
-      </div>
+      <PageHeader
+        title="Performance Core (Enriched)"
+        subtitle="Main performance snapshot from enriched team and observed role grouping."
+      />
 
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-        <div className="rounded-xl border bg-slate-50 p-3 text-center">
-          <div className="text-[11px] text-slate-500">Teams</div>
-          <div className="mt-2 text-2xl font-semibold">{totals.teams}</div>
-        </div>
-        <div className="rounded-xl border bg-slate-50 p-3 text-center">
-          <div className="text-[11px] text-slate-500">Operators</div>
-          <div className="mt-2 text-2xl font-semibold">{totals.operators}</div>
-        </div>
-        <div className="rounded-xl border bg-slate-50 p-3 text-center">
-          <div className="text-[11px] text-slate-500">Repl Plates</div>
-          <div className="mt-2 text-2xl font-semibold">{fmt(totals.replPlates)}</div>
-        </div>
-        <div className="rounded-xl border bg-slate-50 p-3 text-center">
-          <div className="text-[11px] text-slate-500">Repl Pieces</div>
-          <div className="mt-2 text-2xl font-semibold">{fmt(totals.replPieces)}</div>
-        </div>
+        <StatCard label="Teams">{totals.teams}</StatCard>
+        <StatCard label="Operators">{totals.operators}</StatCard>
+        <StatCard label="Repl Plates">{fmt(totals.replPlates)}</StatCard>
+        <StatCard label="Repl Pieces">{fmt(totals.replPieces)}</StatCard>
       </div>
 
       <div className="space-y-4">
