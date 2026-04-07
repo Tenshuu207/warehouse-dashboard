@@ -6,7 +6,6 @@ from typing import Any
 
 from common import load_json, save_json
 
-
 TOP_N = 15
 
 
@@ -85,7 +84,11 @@ def top_delta_rows(
 
     for row in rows:
         kind = overlap_kind(row)
-        if require_overlap and kind not in {"all_three", "userls_and_daily_only", "userls_and_forkstdl_only"}:
+        if require_overlap and kind not in {
+            "all_three",
+            "userls_and_daily_only",
+            "userls_and_forkstdl_only",
+        }:
             continue
 
         value = row.get("deltas", {}).get(delta_group, {}).get(delta_key)
@@ -112,7 +115,7 @@ def summarize(compare_json: str, output_json: str) -> None:
     data = load_json(compare_json)
     rows = data.get("rows", [])
 
-    overlap_buckets = {
+    overlap_buckets: dict[str, list[dict[str, Any]]] = {
         "all_three": [],
         "userls_and_daily_only": [],
         "userls_and_forkstdl_only": [],
@@ -133,22 +136,44 @@ def summarize(compare_json: str, output_json: str) -> None:
         "overlapCounts": overlap_counts,
         "topDeltas": {
             "userls_vs_daily": {
-                "letdownPlates": top_delta_rows(rows, "userls_vs_daily", "letdownPlates"),
-                "putawayPlates": top_delta_rows(rows, "userls_vs_daily", "putawayPlates"),
-                "restockRawPlates": top_delta_rows(rows, "userls_vs_daily", "restockRawPlates"),
-                "restockLikeEstimated": top_delta_rows(rows, "userls_vs_daily", "restockLikeEstimated"),
-                "receivingPlates": top_delta_rows(rows, "userls_vs_daily", "receivingPlates"),
-                "receivingPieces": top_delta_rows(rows, "userls_vs_daily", "receivingPieces"),
-                "nonpickPlatesVsTotalNoRecv": top_delta_rows(rows, "userls_vs_daily", "nonpickPlatesVsTotalNoRecv"),
-                "nonpickPiecesVsTotalNoRecv": top_delta_rows(rows, "userls_vs_daily", "nonpickPiecesVsTotalNoRecv"),
+                "letdownPlates": top_delta_rows(
+                    rows, "userls_vs_daily", "letdownPlates"
+                ),
+                "putawayPlates": top_delta_rows(
+                    rows, "userls_vs_daily", "putawayPlates"
+                ),
+                "restockRawPlates": top_delta_rows(
+                    rows, "userls_vs_daily", "restockRawPlates"
+                ),
+                "restockLikeEstimated": top_delta_rows(
+                    rows, "userls_vs_daily", "restockLikeEstimated"
+                ),
+                "receivingPlates": top_delta_rows(
+                    rows, "userls_vs_daily", "receivingPlates"
+                ),
+                "receivingPieces": top_delta_rows(
+                    rows, "userls_vs_daily", "receivingPieces"
+                ),
+                "nonpickPlatesVsTotalNoRecv": top_delta_rows(
+                    rows, "userls_vs_daily", "nonpickPlatesVsTotalNoRecv"
+                ),
+                "nonpickPiecesVsTotalNoRecv": top_delta_rows(
+                    rows, "userls_vs_daily", "nonpickPiecesVsTotalNoRecv"
+                ),
             },
             "userls_vs_forkstdl": {
                 "letdown": top_delta_rows(rows, "userls_vs_forkstdl", "letdown"),
                 "putaway": top_delta_rows(rows, "userls_vs_forkstdl", "putaway"),
                 "restockRaw": top_delta_rows(rows, "userls_vs_forkstdl", "restock_raw"),
-                "restockLikeRaw": top_delta_rows(rows, "userls_vs_forkstdl", "restock_like_raw"),
-                "restockLikeEstimated": top_delta_rows(rows, "userls_vs_forkstdl", "restock_like_estimated"),
-                "nonpickTotal": top_delta_rows(rows, "userls_vs_forkstdl", "nonpick_total"),
+                "restockLikeRaw": top_delta_rows(
+                    rows, "userls_vs_forkstdl", "restock_like_raw"
+                ),
+                "restockLikeEstimated": top_delta_rows(
+                    rows, "userls_vs_forkstdl", "restock_like_estimated"
+                ),
+                "nonpickTotal": top_delta_rows(
+                    rows, "userls_vs_forkstdl", "nonpick_total"
+                ),
             },
         },
         "userlsOnlyUsers": overlap_buckets["userls_only"],

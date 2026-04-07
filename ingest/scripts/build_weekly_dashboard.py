@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from common import load_json, save_json
 from db_sqlite import connect, upsert_dataset_component, upsert_snapshot
@@ -26,7 +26,9 @@ def empty_area_mix_row() -> dict[str, Any]:
     }
 
 
-def daily_fact_from_flat_operator(op: dict[str, Any], daily_date: str | None) -> dict[str, Any]:
+def daily_fact_from_flat_operator(
+    op: dict[str, Any], daily_date: str | None
+) -> dict[str, Any]:
     total_plates = op.get("totalPlates", 0)
     total_pieces = op.get("totalPieces", 0)
     receiving_plates = op.get("receivingPlates", 0)
@@ -62,9 +64,12 @@ def daily_fact_from_flat_operator(op: dict[str, Any], daily_date: str | None) ->
             "totalPieces": total_pieces,
             "totalPlatesNoRecv": total_plates_no_recv,
             "totalPiecesNoRecv": total_pieces_no_recv,
-            "avgPiecesPerPlate": op.get("avgPiecesPerPlate", avg(total_pieces, total_plates)),
+            "avgPiecesPerPlate": op.get(
+                "avgPiecesPerPlate", avg(total_pieces, total_plates)
+            ),
             "avgPiecesPerPlateNoRecv": op.get(
-                "avgPiecesPerPlateNoRecv", avg(total_pieces_no_recv, total_plates_no_recv)
+                "avgPiecesPerPlateNoRecv",
+                avg(total_pieces_no_recv, total_plates_no_recv),
             ),
             "actualMinutes": op.get("actualMinutes", 0),
             "standardMinutes": op.get("standardMinutes", 0),
@@ -82,7 +87,9 @@ def daily_fact_from_flat_operator(op: dict[str, Any], daily_date: str | None) ->
             "hasAssignedRoleOverride": bool(review_assigned_role),
             "hasAssignedAreaOverride": bool(review_assigned_area),
             "hasForcedPerformanceArea": bool(performance_overrides.get("forceArea")),
-            "hasExclusion": bool(performance_overrides.get("excludeFromLeaderboard", False)),
+            "hasExclusion": bool(
+                performance_overrides.get("excludeFromLeaderboard", False)
+            ),
         },
         "effective": {
             "assignedRole": op.get("effectiveAssignedRole", op.get("assignedRole")),
@@ -103,7 +110,10 @@ def iter_daily_facts(data: dict[str, Any]) -> list[dict[str, Any]]:
         return facts
 
     daily_date = data.get("date")
-    return [daily_fact_from_flat_operator(op, daily_date) for op in data.get("operators", [])]
+    return [
+        daily_fact_from_flat_operator(op, daily_date)
+        for op in data.get("operators", [])
+    ]
 
 
 def init_weekly_fact(userid: str, name: str) -> dict[str, Any]:
@@ -231,13 +241,17 @@ def update_weekly_fact(agg: dict[str, Any], fact: dict[str, Any]) -> None:
 
     if review.get("assignedRoleOverride"):
         agg["review"]["assignedRoleOverride"] = review.get("assignedRoleOverride")
-        agg["review"]["assignedRoleOverridesSeen"].add(review.get("assignedRoleOverride"))
+        agg["review"]["assignedRoleOverridesSeen"].add(
+            review.get("assignedRoleOverride")
+        )
         agg["review"]["daysWithAssignedRoleOverride"] += 1
         agg["review"]["hasAssignedRoleOverride"] = True
 
     if review.get("assignedAreaOverride"):
         agg["review"]["assignedAreaOverride"] = review.get("assignedAreaOverride")
-        agg["review"]["assignedAreaOverridesSeen"].add(review.get("assignedAreaOverride"))
+        agg["review"]["assignedAreaOverridesSeen"].add(
+            review.get("assignedAreaOverride")
+        )
         agg["review"]["daysWithAssignedAreaOverride"] += 1
         agg["review"]["hasAssignedAreaOverride"] = True
 
@@ -282,8 +296,12 @@ def update_weekly_fact(agg: dict[str, Any], fact: dict[str, Any]) -> None:
         agg["effective"]["performanceArea"] = effective.get("performanceArea")
         agg["effective"]["performanceAreasSeen"].add(effective.get("performanceArea"))
 
-    agg["effective"]["excludedFromLeaderboard"] = bool(effective.get("excludedFromLeaderboard", False))
-    agg["effective"]["excludeReason"] = effective.get("excludeReason", "") or agg["effective"]["excludeReason"]
+    agg["effective"]["excludedFromLeaderboard"] = bool(
+        effective.get("excludedFromLeaderboard", False)
+    )
+    agg["effective"]["excludeReason"] = (
+        effective.get("excludeReason", "") or agg["effective"]["excludeReason"]
+    )
 
     for flag in fact.get("audit", {}).get("flags", []):
         agg["audit"]["flags"].add(flag)
@@ -299,9 +317,13 @@ def finalize_weekly_fact(agg: dict[str, Any]) -> dict[str, Any]:
 
     raw["areaMix"] = area_mix
     raw["avgPiecesPerPlate"] = avg(raw["totalPieces"], raw["totalPlates"])
-    raw["avgPiecesPerPlateNoRecv"] = avg(raw["totalPiecesNoRecv"], raw["totalPlatesNoRecv"])
+    raw["avgPiecesPerPlateNoRecv"] = avg(
+        raw["totalPiecesNoRecv"], raw["totalPlatesNoRecv"]
+    )
     raw["performanceVsStandard"] = (
-        round((raw["standardMinutes"] / raw["actualMinutes"]) * 100, 2) if raw["actualMinutes"] else 0
+        round((raw["standardMinutes"] / raw["actualMinutes"]) * 100, 2)
+        if raw["actualMinutes"]
+        else 0
     )
     raw["assignedRolesSeen"] = sorted(raw["assignedRolesSeen"])
     raw["assignedAreasSeen"] = sorted(raw["assignedAreasSeen"])
@@ -330,7 +352,6 @@ def project_operator_for_dashboard(fact: dict[str, Any]) -> dict[str, Any]:
     return {
         "userid": fact["userid"],
         "name": fact["name"],
-
         # Existing UI-compatible fields
         "assignedRole": effective["assignedRole"],
         "assignedArea": effective["assignedArea"],
@@ -358,7 +379,6 @@ def project_operator_for_dashboard(fact: dict[str, Any]) -> dict[str, Any]:
         "effectivePerformanceArea": effective["performanceArea"],
         "areaMix": raw["areaMix"],
         "auditFlags": fact["audit"]["flags"],
-
         # Explicit raw/review/effective fields
         "rawAssignedRole": raw["assignedRole"],
         "rawAssignedArea": raw["assignedArea"],
@@ -366,12 +386,10 @@ def project_operator_for_dashboard(fact: dict[str, Any]) -> dict[str, Any]:
         "reviewAssignedAreaOverride": review["assignedAreaOverride"],
         "effectiveAssignedRole": effective["assignedRole"],
         "effectiveAssignedArea": effective["assignedArea"],
-
         # No-receiving totals
         "totalPlatesNoRecv": raw["totalPlatesNoRecv"],
         "totalPiecesNoRecv": raw["totalPiecesNoRecv"],
         "avgPiecesPerPlateNoRecv": raw["avgPiecesPerPlateNoRecv"],
-
         # Helpful weekly context
         "sourceDates": fact["sourceDates"],
         "rawAssignedRolesSeen": raw["assignedRolesSeen"],
@@ -439,7 +457,10 @@ def build_observed_areas(
             "standardMinutes": vals["standardMinutes"],
             "userCount": len(vals["userIds"]),
         }
-        for _, vals in sorted(observed_areas.items(), key=lambda item: (item[1]["areaName"], item[1]["areaCode"]))
+        for _, vals in sorted(
+            observed_areas.items(),
+            key=lambda item: (item[1]["areaName"], item[1]["areaCode"]),
+        )
     ]
 
 
@@ -464,7 +485,9 @@ def build_weekly_dashboard(daily_dir: str, week_start: str, output_path: str) ->
 
     selected = [f for f in daily_files if f.stem >= week_start][:7]
     if not selected:
-        raise FileNotFoundError(f"No daily dashboard files found from {week_start} in {daily_dir}")
+        raise FileNotFoundError(
+            f"No daily dashboard files found from {week_start} in {daily_dir}"
+        )
 
     summary = {
         "totalPlates": 0,
@@ -520,7 +543,9 @@ def build_weekly_dashboard(daily_dir: str, week_start: str, output_path: str) ->
         for fact in iter_daily_facts(data):
             userid = fact["userid"]
             if userid not in operators_by_user:
-                operators_by_user[userid] = init_weekly_fact(userid, fact.get("name", userid))
+                operators_by_user[userid] = init_weekly_fact(
+                    userid, fact.get("name", userid)
+                )
             update_weekly_fact(operators_by_user[userid], fact)
 
             for mix in fact.get("raw", {}).get("areaMix", []):
@@ -543,10 +568,18 @@ def build_weekly_dashboard(daily_dir: str, week_start: str, output_path: str) ->
             a["areaName"] = area["areaName"]
 
         audit = data.get("auditSummary", {})
-        audit_summary["usersWithMissingAreaMix"].update(audit.get("usersWithMissingAreaMix", []))
-        audit_summary["usersWithMissingManualAssignment"].update(audit.get("usersWithMissingManualAssignment", []))
-        audit_summary["unknownAreaRows"] += audit.get("unknownAreaRows", 0)
-        audit_summary["negativeTransactions"] += audit.get("negativeTransactions", 0)
+        cast(set[str], audit_summary["usersWithMissingAreaMix"]).update(
+            audit.get("usersWithMissingAreaMix", [])
+        )
+        cast(set[str], audit_summary["usersWithMissingManualAssignment"]).update(
+            audit.get("usersWithMissingManualAssignment", [])
+        )
+        audit_summary["unknownAreaRows"] = cast(
+            int, audit_summary["unknownAreaRows"]
+        ) + int(audit.get("unknownAreaRows", 0))
+        audit_summary["negativeTransactions"] = cast(
+            int, audit_summary["negativeTransactions"]
+        ) + int(audit.get("negativeTransactions", 0))
 
     operator_facts = [finalize_weekly_fact(op) for op in operators_by_user.values()]
     operator_facts.sort(key=lambda x: x["raw"]["totalPieces"], reverse=True)
@@ -554,8 +587,13 @@ def build_weekly_dashboard(daily_dir: str, week_start: str, output_path: str) ->
     operators = [project_operator_for_dashboard(fact) for fact in operator_facts]
     receiving = build_receiving_rows(operators)
 
-    summary["avgPiecesPerPlate"] = avg(summary["totalPieces"], summary["totalPlates"])
-    summary["avgPiecesPerPlateNoRecv"] = avg(summary["totalPiecesNoRecv"], summary["totalPlatesNoRecv"])
+    summary_any = cast(dict[str, Any], summary)
+    summary_any["avgPiecesPerPlate"] = avg(
+        summary["totalPieces"], summary["totalPlates"]
+    )
+    summary_any["avgPiecesPerPlateNoRecv"] = avg(
+        summary["totalPiecesNoRecv"], summary["totalPlatesNoRecv"]
+    )
 
     payload = {
         "weekStart": week_start,
@@ -568,8 +606,12 @@ def build_weekly_dashboard(daily_dir: str, week_start: str, output_path: str) ->
         "observedAreas": build_observed_areas(observed_areas),
         "receiving": receiving,
         "auditSummary": {
-            "usersWithMissingAreaMix": sorted(audit_summary["usersWithMissingAreaMix"]),
-            "usersWithMissingManualAssignment": sorted(audit_summary["usersWithMissingManualAssignment"]),
+            "usersWithMissingAreaMix": sorted(
+                cast(set[str], audit_summary["usersWithMissingAreaMix"])
+            ),
+            "usersWithMissingManualAssignment": sorted(
+                cast(set[str], audit_summary["usersWithMissingManualAssignment"])
+            ),
             "unknownAreaRows": audit_summary["unknownAreaRows"],
             "negativeTransactions": audit_summary["negativeTransactions"],
         },
@@ -586,7 +628,10 @@ def build_weekly_dashboard(daily_dir: str, week_start: str, output_path: str) ->
             component_type="weekly",
             status="ready",
             source_path=output_path,
-            details={"weekStart": week_start, "sourceDates": payload.get("sourceDates", [])},
+            details={
+                "weekStart": week_start,
+                "sourceDates": payload.get("sourceDates", []),
+            },
         )
     finally:
         conn.close()
@@ -594,7 +639,9 @@ def build_weekly_dashboard(daily_dir: str, week_start: str, output_path: str) ->
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
-        print("Usage: python3 build_weekly_dashboard.py <daily_dir> <week_start> <output_json>")
+        print(
+            "Usage: python3 build_weekly_dashboard.py <daily_dir> <week_start> <output_json>"
+        )
         sys.exit(1)
 
     build_weekly_dashboard(sys.argv[1], sys.argv[2], sys.argv[3])
