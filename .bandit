@@ -1,0 +1,2 @@
+[bandit]
+exclude_dirs = audit_env,.venv,venv,node_modules,.next,build,dist

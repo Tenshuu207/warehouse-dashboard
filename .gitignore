@@ -44,3 +44,7 @@ ingest/state/
 *.db-shm
 *.db-wal
 warehouse_db_phase1_patch.sh
+
+# local backups / scratch
+*.bak.*
+audit_env/

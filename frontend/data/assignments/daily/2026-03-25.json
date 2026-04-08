@@ -1,0 +1,96 @@
+{
+  "date": "2026-03-25",
+  "updatedAt": "2026-04-07T21:24:09.896Z",
+  "sections": [
+    {
+      "team": "Freezer",
+      "role": "FrzPut",
+      "employees": [
+        "Aaron Gagne"
+      ]
+    },
+    {
+      "team": "Freezer",
+      "role": "FrzLet",
+      "employees": [
+        "Bradley Melanson"
+      ]
+    },
+    {
+      "team": "Freezer",
+      "role": "FrzMix",
+      "employees": [
+        "Ryan Cormier"
+      ]
+    },
+    {
+      "team": "Freezer PIR",
+      "role": "FrzPIR",
+      "employees": [
+        "David Westerman"
+      ]
+    },
+    {
+      "team": "Dry",
+      "role": "DryMix",
+      "employees": [
+        "Chris Simmons"
+      ]
+    },
+    {
+      "team": "Dry",
+      "role": "DryFlr",
+      "employees": [
+        "Scott Bell"
+      ]
+    },
+    {
+      "team": "Dry PIR",
+      "role": "DryPIR",
+      "employees": [
+        "Philip Philyaw"
+      ]
+    },
+    {
+      "team": "Cooler",
+      "role": "ClrDairy",
+      "employees": [
+        "Reece Miller"
+      ]
+    },
+    {
+      "team": "Cooler",
+      "role": "ClrMeat",
+      "employees": [
+        "Dwight Lingley"
+      ]
+    },
+    {
+      "team": "Cooler",
+      "role": "Produce",
+      "employees": [
+        "Shawn Hewes"
+      ]
+    },
+    {
+      "team": "Receiving",
+      "role": "Receiving",
+      "employees": [
+        "Shawn Finley",
+        "Ryan Rowe",
+        "Lliam Breingan",
+        "Randall Burke"
+      ]
+    },
+    {
+      "team": "Unassigned",
+      "role": "Float",
+      "employees": [
+        "Jesse Lewin",
+        "Steve Richards",
+        "Keith Sewall",
+        "Alvah Humphrey"
+      ]
+    }
+  ]
+}
