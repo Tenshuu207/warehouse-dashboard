@@ -1,93 +1,116 @@
 {
   "mappings": [
     {
+      "rfUsername": "cmcnaugh",
+      "employeeId": "EMP0019",
+      "effectiveStartDate": "2026-03-25",
+      "active": true
+    },
+    {
       "rfUsername": "kmakela",
       "employeeId": "EMP0001",
-      "effectiveStartDate": "2026-04-03",
+      "effectiveStartDate": "2026-03-25",
+      "active": true
+    },
+    {
+      "rfUsername": "lbreinga",
+      "employeeId": "EMP0011",
+      "effectiveStartDate": "2026-03-25",
       "active": true
     },
     {
       "rfUsername": "rfajg",
       "employeeId": "EMP0005",
-      "effectiveStartDate": "2026-04-03",
+      "effectiveStartDate": "2026-03-25",
       "active": true
     },
     {
       "rfUsername": "rfbjm",
       "employeeId": "EMP0002",
-      "effectiveStartDate": "2026-04-03",
+      "effectiveStartDate": "2026-03-25",
       "active": true
     },
     {
       "rfUsername": "rfcrs",
       "employeeId": "EMP0006",
-      "effectiveStartDate": "2026-04-03",
+      "effectiveStartDate": "2026-03-25",
       "active": true
     },
     {
       "rfUsername": "rfdel",
       "employeeId": "EMP0007",
-      "effectiveStartDate": "2026-04-03",
+      "effectiveStartDate": "2026-03-25",
       "active": true
     },
     {
       "rfUsername": "rfdjm",
       "employeeId": "EMP0008",
-      "effectiveStartDate": "2026-04-03",
+      "effectiveStartDate": "2026-03-25",
       "active": true
     },
     {
       "rfUsername": "rfdsw",
       "employeeId": "EMP0009",
-      "effectiveStartDate": "2026-04-03",
+      "effectiveStartDate": "2026-03-25",
       "active": true
     },
     {
       "rfUsername": "rfjll",
       "employeeId": "EMP0010",
-      "effectiveStartDate": "2026-04-03",
+      "effectiveStartDate": "2026-03-25",
       "active": true
     },
     {
       "rfUsername": "rflrb",
       "employeeId": "EMP0011",
-      "effectiveStartDate": "2026-04-03",
+      "effectiveStartDate": "2026-03-25",
       "active": true
     },
     {
       "rfUsername": "rfpjp",
       "employeeId": "EMP0012",
-      "effectiveStartDate": "2026-04-03",
+      "effectiveStartDate": "2026-03-25",
       "active": true
     },
     {
       "rfUsername": "rfrar",
       "employeeId": "EMP0013",
-      "effectiveStartDate": "2026-04-03",
+      "effectiveStartDate": "2026-03-25",
+      "active": true
+    },
+    {
+      "rfUsername": "rfreb",
+      "employeeId": "EMP0018",
+      "effectiveStartDate": "2026-03-25",
       "active": true
     },
     {
       "rfUsername": "rfrem",
       "employeeId": "EMP0014",
-      "effectiveStartDate": "2026-04-03",
+      "effectiveStartDate": "2026-03-25",
       "active": true
     },
     {
       "rfUsername": "rfrpc",
       "employeeId": "EMP0015",
-      "effectiveStartDate": "2026-04-03",
+      "effectiveStartDate": "2026-03-25",
+      "active": true
+    },
+    {
+      "rfUsername": "rfseh",
+      "employeeId": "EMP0017",
       "active": true
     },
     {
       "rfUsername": "rfsmf",
       "employeeId": "EMP0003",
-      "effectiveStartDate": "2026-04-03",
+      "effectiveStartDate": "2026-03-25",
       "active": true
     },
     {
       "rfUsername": "rfsrb",
       "employeeId": "EMP0016",
-      "effectiveStartDate": "2026-04-03",
+      "effectiveStartDate": "2026-03-25",
       "active": true
     }
   ]

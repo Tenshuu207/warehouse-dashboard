@@ -49,38 +49,98 @@ function cleanDisplayName(op: Record<string, unknown>) {
   return human || candidates.find((value) => value !== "Unknown") || "Unknown";
 }
 
-function resolvedSheetName(
-  op: Record<string, unknown>,
-  selectedWeek: string,
-  employees: Record<string, EmployeeRecord>,
-  mappings: RfMapping[],
-  defaults: Record<string, OperatorDefault>
-) {
-  const resolved = resolveOperatorIdentity({
-    rfUsername: String(op.userid || ""),
-    fallbackName: cleanDisplayName(op),
-    fallbackTeam: String(
-      op.rawAssignedArea ||
-        op.effectiveAssignedArea ||
-        op.assignedArea ||
-        op.area ||
-        ""
-    ),
-    selectedDate: selectedWeek,
-    employees,
-    mappings,
-    defaultTeams: defaults,
-  });
+function normalizeNameKey(value: unknown) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, " ");
+}
 
-  const display = String(resolved.displayName || "")
-    .replace(/\s*\(RF\)\s*$/i, "")
-    .trim();
+function uniqueSorted(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b));
+}
 
-  return display || cleanDisplayName(op);
+function mergeKeyForEmployee(employeeId: string | null, resolvedName: string, userid: string) {
+  if (employeeId) return `emp:${employeeId}`;
+
+  const normalizedName = normalizeNameKey(resolvedName);
+  if (normalizedName) return `name:${normalizedName}`;
+
+  return `rf:${userid}`;
+}
+
+function normalizeWeeklyAreaLabel(value: unknown): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "Other";
+
+  const key = raw.toLowerCase();
+
+  if (key.includes("freezer pir") || key == "frzpir") return "Freezer PIR";
+  if (key == "freezer" || key.startsWith("frz")) return "Freezer";
+  if (key.includes("dry pir") || key == "drypir") return "Dry PIR";
+  if (key == "dry" || key.startsWith("dry")) return "Dry";
+
+  if (
+    key.includes("cooler") ||
+    key.includes("produce") ||
+    key.includes("seafood") ||
+    key.includes("chicken") ||
+    key.includes("clr")
+  ) {
+    return "Cooler";
+  }
+
+  return raw;
+}
+
+type AreaBucketLike = {
+  areaCode?: string | null;
+  area?: string | null;
+  label?: string | null;
+  name?: string | null;
+  letdownPlates?: number;
+  letdownPieces?: number;
+  putawayPlates?: number;
+  putawayPieces?: number;
+  restockPlates?: number;
+  restockPieces?: number;
+  restockPlatesRaw?: number;
+  restockPiecesRaw?: number;
+  restockLikePlatesEstimated?: number;
+  restockLikePiecesEstimated?: number;
+  replenishmentNoRecvPlates?: number;
+  replenishmentNoRecvPieces?: number;
+};
+
+type AreaTotalRow = {
+  area: string;
+  letdownPlates: number;
+  letdownPieces: number;
+  putawayPlates: number;
+  putawayPieces: number;
+  restockPlates: number;
+  restockPieces: number;
+  totalPlates: number;
+  totalPieces: number;
+};
+
+function getAreaBucketsFromOperator(op: Record<string, unknown>): AreaBucketLike[] {
+  const tracking =
+    op.userlsTracking && typeof op.userlsTracking === "object"
+      ? (op.userlsTracking as Record<string, unknown>)
+      : null;
+
+  const direct = Array.isArray(op.areaBuckets) ? op.areaBuckets : null;
+  const nested = tracking && Array.isArray(tracking.areaBuckets) ? tracking.areaBuckets : null;
+
+  return (direct || nested || []) as AreaBucketLike[];
 }
 
 type Row = {
-  userid: string;
+  rowKey: string;
+  employeeId: string | null;
+  primaryUserid: string;
+  rfUsernames: string[];
   name: string;
   role: string;
   area: string;
@@ -188,7 +248,7 @@ export default function WeeklySheetView() {
       }
     }
 
-    if (selectedWeek) load();
+    if (selectedWeek) void load();
 
     return () => {
       cancelled = true;
@@ -197,37 +257,74 @@ export default function WeeklySheetView() {
 
   const rows = useMemo<Row[]>(() => {
     const ops = (data?.operators ?? []) as Array<Record<string, unknown>>;
+    const grouped = new Map<Row["rowKey"], Row>();
 
-    return ops
-      .map((op) => {
-        const letdownPlates = safeNum(op.letdownPlates);
-        const letdownPieces = safeNum(op.letdownPieces);
-        const putawayPlates = safeNum(op.putawayPlates);
-        const putawayPieces = safeNum(op.putawayPieces);
-        const restockPlates = safeNum(op.restockPlates);
-        const restockPieces = safeNum(op.restockPieces);
-        const receivingPlates = safeNum(op.receivingPlates);
-        const receivingPieces = safeNum(op.receivingPieces);
+    for (const op of ops) {
+      const userid = String(op.userid || "").trim();
+      if (!userid) continue;
 
-        const totalPlates = letdownPlates + putawayPlates + restockPlates;
-        const totalPieces = letdownPieces + putawayPieces + restockPieces;
+      const fallbackName = cleanDisplayName(op);
+      const fallbackTeam = String(
+        op.rawAssignedArea ||
+          op.effectiveAssignedArea ||
+          op.assignedArea ||
+          op.area ||
+          ""
+      );
 
-        return {
-          userid: String(op.userid || ""),
-          name: resolvedSheetName(op, selectedWeek, employees, mappings, defaults),
-          role: String(
-            op.effectiveAssignedRole ||
-              op.currentRole ||
-              op.rawAssignedRole ||
-              "—"
-          ),
-          area: String(
-            op.effectivePerformanceArea ||
-              op.rawDominantArea ||
-              op.effectiveAssignedArea ||
-              op.area ||
-              "Other"
-          ),
+      const resolved = resolveOperatorIdentity({
+        rfUsername: userid,
+        fallbackName,
+        fallbackTeam,
+        selectedDate: selectedWeek,
+        employees,
+        mappings,
+        defaultTeams: defaults,
+      });
+
+      const name =
+        String(resolved.displayName || "")
+          .replace(/\s*\(RF\)\s*$/i, "")
+          .trim() || fallbackName;
+
+      const employeeId = resolved.employeeId || null;
+      const rowKey = mergeKeyForEmployee(employeeId, name || fallbackName, userid);
+
+      const role = String(
+        op.effectiveAssignedRole ||
+          op.currentRole ||
+          op.rawAssignedRole ||
+          "—"
+      );
+
+      const area = String(
+        op.effectivePerformanceArea ||
+          op.rawDominantArea ||
+          op.effectiveAssignedArea ||
+          op.area ||
+          "Other"
+      );
+
+      const letdownPlates = safeNum(op.letdownPlates);
+      const letdownPieces = safeNum(op.letdownPieces);
+      const putawayPlates = safeNum(op.putawayPlates);
+      const putawayPieces = safeNum(op.putawayPieces);
+      const restockPlates = safeNum(op.restockPlates);
+      const restockPieces = safeNum(op.restockPieces);
+      const receivingPlates = safeNum(op.receivingPlates);
+      const receivingPieces = safeNum(op.receivingPieces);
+      const totalPlates = letdownPlates + putawayPlates + restockPlates;
+      const totalPieces = letdownPieces + putawayPieces + restockPieces;
+
+      if (!grouped.has(rowKey)) {
+        grouped.set(rowKey, {
+          rowKey,
+          employeeId,
+          primaryUserid: userid,
+          rfUsernames: [userid],
+          name,
+          role,
+          area,
           letdownPlates,
           letdownPieces,
           putawayPlates,
@@ -238,9 +335,49 @@ export default function WeeklySheetView() {
           totalPieces,
           receivingPlates,
           receivingPieces,
-          avgPcsPerPlate: avgPcsPerPlate(totalPieces, totalPlates),
-        };
-      })
+          avgPcsPerPlate: 0,
+        });
+        continue;
+      }
+
+      const existing = grouped.get(rowKey)!;
+      existing.rfUsernames = uniqueSorted([...existing.rfUsernames, userid]);
+      existing.letdownPlates += letdownPlates;
+      existing.letdownPieces += letdownPieces;
+      existing.putawayPlates += putawayPlates;
+      existing.putawayPieces += putawayPieces;
+      existing.restockPlates += restockPlates;
+      existing.restockPieces += restockPieces;
+      existing.totalPlates += totalPlates;
+      existing.totalPieces += totalPieces;
+      existing.receivingPlates += receivingPlates;
+      existing.receivingPieces += receivingPieces;
+
+      if (
+        existing.role === "—" &&
+        role !== "—"
+      ) {
+        existing.role = role;
+      }
+
+      if (
+        (existing.area === "Other" || !existing.area) &&
+        area &&
+        area !== "Other"
+      ) {
+        existing.area = area;
+      }
+
+      if (totalPieces > existing.totalPieces) {
+        existing.primaryUserid = userid;
+      }
+    }
+
+    return Array.from(grouped.values())
+      .map((row) => ({
+        ...row,
+        avgPcsPerPlate: avgPcsPerPlate(row.totalPieces, row.totalPlates),
+      }))
       .filter((row) => row.totalPlates > 0 || row.receivingPlates > 0)
       .sort((a, b) => b.totalPieces - a.totalPieces);
   }, [data, selectedWeek, employees, mappings, defaults]);
@@ -275,26 +412,17 @@ export default function WeeklySheetView() {
     );
   }, [rows]);
 
-  const areaTotals = useMemo(() => {
-    const grouped = new Map<
-      string,
-      {
-        area: string;
-        letdownPlates: number;
-        letdownPieces: number;
-        putawayPlates: number;
-        putawayPieces: number;
-        restockPlates: number;
-        restockPieces: number;
-        totalPlates: number;
-        totalPieces: number;
-      }
-    >();
+  const areaTotals = useMemo<AreaTotalRow[]>(() => {
+    const ops = (data?.operators ?? []) as Array<Record<string, unknown>>;
+    const grouped = new Map<string, AreaTotalRow>();
 
-    for (const row of rows) {
-      const key = row.area || "Other";
-      const current = grouped.get(key) || {
-        area: key,
+    function ensure(area: string): AreaTotalRow {
+      const normalized = normalizeWeeklyAreaLabel(area);
+      const existing = grouped.get(normalized);
+      if (existing) return existing;
+
+      const created: AreaTotalRow = {
+        area: normalized,
         letdownPlates: 0,
         letdownPieces: 0,
         putawayPlates: 0,
@@ -304,21 +432,80 @@ export default function WeeklySheetView() {
         totalPlates: 0,
         totalPieces: 0,
       };
-
-      current.letdownPlates += row.letdownPlates;
-      current.letdownPieces += row.letdownPieces;
-      current.putawayPlates += row.putawayPlates;
-      current.putawayPieces += row.putawayPieces;
-      current.restockPlates += row.restockPlates;
-      current.restockPieces += row.restockPieces;
-      current.totalPlates += row.totalPlates;
-      current.totalPieces += row.totalPieces;
-
-      grouped.set(key, current);
+      grouped.set(normalized, created);
+      return created;
     }
 
-    return [...grouped.values()].sort((a, b) => b.totalPieces - a.totalPieces);
-  }, [rows]);
+    for (const op of ops) {
+      const buckets = getAreaBucketsFromOperator(op);
+
+      if (buckets.length > 0) {
+        for (const bucket of buckets) {
+          const target = ensure(
+            bucket.areaCode || bucket.area || bucket.label || bucket.name || "Other"
+          );
+
+          const letdownPlates = safeNum(bucket.letdownPlates);
+          const letdownPieces = safeNum(bucket.letdownPieces);
+          const putawayPlates = safeNum(bucket.putawayPlates);
+          const putawayPieces = safeNum(bucket.putawayPieces);
+          const restockPlates =
+            safeNum(bucket.restockPlates) ||
+            safeNum(bucket.restockPlatesRaw) ||
+            safeNum(bucket.restockLikePlatesEstimated);
+          const restockPieces =
+            safeNum(bucket.restockPieces) ||
+            safeNum(bucket.restockPiecesRaw) ||
+            safeNum(bucket.restockLikePiecesEstimated);
+
+          target.letdownPlates += letdownPlates;
+          target.letdownPieces += letdownPieces;
+          target.putawayPlates += putawayPlates;
+          target.putawayPieces += putawayPieces;
+          target.restockPlates += restockPlates;
+          target.restockPieces += restockPieces;
+          target.totalPlates += letdownPlates + putawayPlates + restockPlates;
+          target.totalPieces += letdownPieces + putawayPieces + restockPieces;
+        }
+        continue;
+      }
+
+      const fallbackArea = String(
+        op.effectivePerformanceArea ||
+          op.rawDominantArea ||
+          op.effectiveAssignedArea ||
+          op.area ||
+          "Other"
+      );
+      const target = ensure(fallbackArea);
+
+      const letdownPlates = safeNum(op.letdownPlates);
+      const letdownPieces = safeNum(op.letdownPieces);
+      const putawayPlates = safeNum(op.putawayPlates);
+      const putawayPieces = safeNum(op.putawayPieces);
+      const restockPlates =
+        safeNum(op.restockPlates) || safeNum(op.restockLikePlatesEstimated);
+      const restockPieces =
+        safeNum(op.restockPieces) || safeNum(op.restockLikePiecesEstimated);
+
+      target.letdownPlates += letdownPlates;
+      target.letdownPieces += letdownPieces;
+      target.putawayPlates += putawayPlates;
+      target.putawayPieces += putawayPieces;
+      target.restockPlates += restockPlates;
+      target.restockPieces += restockPieces;
+      target.totalPlates += letdownPlates + putawayPlates + restockPlates;
+      target.totalPieces += letdownPieces + putawayPieces + restockPieces;
+    }
+
+    return [...grouped.values()]
+      .filter((row) => row.totalPlates > 0 || row.totalPieces > 0)
+      .sort((a, b) => {
+        const pieceDiff = b.totalPieces - a.totalPieces;
+        if (pieceDiff !== 0) return pieceDiff;
+        return a.area.localeCompare(b.area);
+      });
+  }, [data]);
 
   const topReceiving = useMemo(
     () =>
@@ -435,15 +622,17 @@ export default function WeeklySheetView() {
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.userid} className="bg-white">
+                  <tr key={row.rowKey} className="bg-white">
                     <td className="border border-slate-900 px-3 py-1.5 font-medium">
                       <Link
-                        href={`/operators/${encodeURIComponent(row.userid)}`}
+                        href={`/operators/${encodeURIComponent(row.primaryUserid)}`}
                         className="hover:underline"
                       >
                         {row.name}
                       </Link>
-                      <div className="text-[11px] text-slate-500">{row.userid}</div>
+                      <div className="text-[11px] text-slate-500">
+                        RF IDs: {row.rfUsernames.join(", ")}
+                      </div>
                     </td>
                     <td className="border border-slate-900 px-3 py-1.5">{row.role}</td>
                     <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
@@ -581,10 +770,10 @@ export default function WeeklySheetView() {
                 </thead>
                 <tbody>
                   {topReceiving.map((row) => (
-                    <tr key={`recv-${row.userid}`}>
+                    <tr key={`recv-${row.rowKey}`}>
                       <td className="border border-slate-900 px-3 py-1.5 font-medium">
                         <Link
-                          href={`/operators/${encodeURIComponent(row.userid)}`}
+                          href={`/operators/${encodeURIComponent(row.primaryUserid)}`}
                           className="hover:underline"
                         >
                           {row.name}

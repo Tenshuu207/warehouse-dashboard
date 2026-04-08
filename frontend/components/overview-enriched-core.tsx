@@ -167,6 +167,11 @@ export default function OverviewEnrichedCore() {
       ) || [];
 
     return rows
+      .filter(
+        (op) =>
+          Number(op.replenishmentPlates || 0) > 0 ||
+          Number(op.replenishmentPieces || 0) > 0
+      )
       .sort((a, b) => {
         const replDiff = Number(b.replenishmentPlates || 0) - Number(a.replenishmentPlates || 0);
         if (replDiff !== 0) return replDiff;
