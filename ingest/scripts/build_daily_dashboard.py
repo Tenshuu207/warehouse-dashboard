@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from collections import defaultdict
 from typing import Any
 
@@ -56,7 +57,9 @@ def build_area_mix_indexes(area_mix: dict[str, Any]) -> tuple[
             "restockMoves": row["restockMoves"],
             "actualMinutes": row["actualMinutes"],
             "standardMinutes": row["standardMinutes"],
-            "totalMoves": row["letdownMoves"] + row["putawayMoves"] + row["restockMoves"],
+            "totalMoves": row["letdownMoves"]
+            + row["putawayMoves"]
+            + row["restockMoves"],
         }
         mix_by_user[userid].append(area_row)
 
@@ -73,12 +76,20 @@ def build_area_mix_indexes(area_mix: dict[str, Any]) -> tuple[
 
         observed_area_users[area_key].add(userid)
 
-        if str(row["areaCode"]).startswith("Unknown") or str(row["areaName"]).startswith("Unknown"):
+        if str(row["areaCode"]).startswith("Unknown") or str(
+            row["areaName"]
+        ).startswith("Unknown"):
             unknown_area_rows += 1
         elif row["areaCode"] not in {"1", "2", "3", "4", "5", "6", "7"}:
             unknown_area_rows += 1
 
-    return mix_by_user, name_by_user, observed_area_totals, observed_area_users, unknown_area_rows
+    return (
+        mix_by_user,
+        name_by_user,
+        observed_area_totals,
+        observed_area_users,
+        unknown_area_rows,
+    )
 
 
 def build_operator_fact(
@@ -93,12 +104,7 @@ def build_operator_fact(
 ) -> dict[str, Any]:
     userid = user["userid"]
 
-    name = (
-        review_info.get("name")
-        or role_info.get("name")
-        or fallback_name
-        or userid
-    )
+    name = review_info.get("name") or role_info.get("name") or fallback_name or userid
 
     raw_assigned_role = role_info.get("assignedRole")
     raw_assigned_area = role_info.get("assignedArea")
@@ -115,7 +121,9 @@ def build_operator_fact(
             user_area_mix,
             key=lambda x: (
                 x.get("actualMinutes", 0),
-                x.get("letdownMoves", 0) + x.get("putawayMoves", 0) + x.get("restockMoves", 0),
+                x.get("letdownMoves", 0)
+                + x.get("putawayMoves", 0)
+                + x.get("restockMoves", 0),
             ),
         )
         raw_dominant_area = dominant_row.get("areaName")
@@ -124,10 +132,14 @@ def build_operator_fact(
     audit_overrides = review_info.get("auditOverrides") or {}
 
     forced_area = performance_overrides.get("forceArea")
-    excluded_from_leaderboard = bool(performance_overrides.get("excludeFromLeaderboard", False))
+    excluded_from_leaderboard = bool(
+        performance_overrides.get("excludeFromLeaderboard", False)
+    )
     exclude_reason = performance_overrides.get("excludeReason", "")
 
-    effective_performance_area = forced_area or raw_dominant_area or effective_assigned_area
+    effective_performance_area = (
+        forced_area or raw_dominant_area or effective_assigned_area
+    )
 
     total_plates = user["totalPlates"]
     total_pieces = user["totalPieces"]
@@ -139,7 +151,11 @@ def build_operator_fact(
 
     total_actual_minutes = sum(row.get("actualMinutes", 0) for row in user_area_mix)
     total_standard_minutes = sum(row.get("standardMinutes", 0) for row in user_area_mix)
-    performance_vs_standard = round((total_standard_minutes / total_actual_minutes) * 100, 2) if total_actual_minutes else 0
+    performance_vs_standard = (
+        round((total_standard_minutes / total_actual_minutes) * 100, 2)
+        if total_actual_minutes
+        else 0
+    )
 
     audit_flags: list[str] = []
 
@@ -236,7 +252,6 @@ def project_operator_for_dashboard(fact: dict[str, Any]) -> dict[str, Any]:
     return {
         "userid": fact["userid"],
         "name": fact["name"],
-
         # Backward-compatible fields used by existing UI
         "assignedRole": effective["assignedRole"],
         "assignedArea": effective["assignedArea"],
@@ -264,7 +279,6 @@ def project_operator_for_dashboard(fact: dict[str, Any]) -> dict[str, Any]:
         "effectivePerformanceArea": effective["performanceArea"],
         "areaMix": raw["areaMix"],
         "auditFlags": fact["audit"]["flags"],
-
         # New explicit fields
         "rawAssignedRole": raw["assignedRole"],
         "rawAssignedArea": raw["assignedArea"],
@@ -376,7 +390,7 @@ def build_dashboard(
     valid_areas = set(options.get("areas", []))
     valid_roles = set(options.get("roles", []))
 
-    report_date = forklift["reportDate"]
+    report_date = forklift.get("reportDate") or area_mix.get("reportDate") or Path(output_path).stem
     review_data = load_review_overrides(review_dir, report_date)
     role_map = roles.get(report_date, {})
 
@@ -423,8 +437,12 @@ def build_dashboard(
     total_pieces = sum(fact["raw"]["totalPieces"] for fact in operator_facts)
     receiving_plates = sum(fact["raw"]["receivingPlates"] for fact in operator_facts)
     receiving_pieces = sum(fact["raw"]["receivingPieces"] for fact in operator_facts)
-    total_plates_no_recv = sum(fact["raw"]["totalPlatesNoRecv"] for fact in operator_facts)
-    total_pieces_no_recv = sum(fact["raw"]["totalPiecesNoRecv"] for fact in operator_facts)
+    total_plates_no_recv = sum(
+        fact["raw"]["totalPlatesNoRecv"] for fact in operator_facts
+    )
+    total_pieces_no_recv = sum(
+        fact["raw"]["totalPiecesNoRecv"] for fact in operator_facts
+    )
 
     payload = {
         "date": report_date,
@@ -441,7 +459,9 @@ def build_dashboard(
         "operators": operators,
         "operatorFacts": operator_facts,
         "assignedAreas": build_assigned_areas(operator_facts),
-        "observedAreas": build_observed_areas(observed_area_totals, observed_area_users),
+        "observedAreas": build_observed_areas(
+            observed_area_totals, observed_area_users
+        ),
         "receiving": build_receiving_rows(operators),
         "auditSummary": {
             "usersWithMissingAreaMix": users_with_missing_area_mix,
@@ -476,5 +496,7 @@ if __name__ == "__main__":
         )
         sys.exit(1)
 
-    build_dashboard(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6])
+    build_dashboard(
+        sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]
+    )
     print(f"Wrote {sys.argv[6]}")

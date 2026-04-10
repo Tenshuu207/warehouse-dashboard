@@ -85,10 +85,18 @@ def parse_file(path: str) -> dict:
             current_userid = None
 
     if not report_date:
-        raise ValueError("Could not determine report date from b_forkl2 file")
+        candidates = [Path(path).parent.name, Path(path).name]
+        for candidate in candidates:
+            match = re.search(r"(20\d{2})-(\d{2})-(\d{2})", candidate)
+            if match:
+                report_date = f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+                break
 
     if not users:
-        raise ValueError("No per-user totals found in b_forkl2 file")
+        users = []
+
+    if not report_date:
+        raise ValueError("Could not determine report date from b_forkl2 file")
 
     return {
         "reportType": "b_forkl2",
