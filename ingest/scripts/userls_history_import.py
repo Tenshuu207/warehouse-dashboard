@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import uuid
@@ -15,6 +16,14 @@ from ingest_manifest import get_active_run
 from parse_rf2_userls import parse_file
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def is_valid_business_date(value: str | None) -> bool:
+    if value is None:
+        return False
+    return bool(ISO_DATE_RE.match(str(value).strip()))
 
 
 def run_cmd(cmd: list[str]) -> dict[str, Any]:
@@ -280,19 +289,19 @@ def split_parsed_by_date(parsed: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
         for tx in user.get("transactions", []) or []:
             date_key = str(tx.get("transDate") or "").strip()
-            if date_key:
+            if is_valid_business_date(date_key):
                 tx_by_date[date_key].append(tx)
 
         for row in user.get("noActivity", []) or []:
             date_key = str(row.get("transDate") or "").strip()
-            if date_key:
+            if is_valid_business_date(date_key):
                 no_activity_by_date[date_key].append(row)
 
         for route_key, route_info in (user.get("routeTotals", {}) or {}).items():
             date_key = str(route_info.get("transDate") or "").strip()
             if not date_key and "|" in str(route_key):
                 date_key = str(route_key).split("|", 1)[0].strip()
-            if date_key:
+            if is_valid_business_date(date_key):
                 route_totals_by_date[date_key][str(route_key)] = route_info
 
         all_dates = sorted(
@@ -327,6 +336,8 @@ def split_parsed_by_date(parsed: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
     per_date_payloads: dict[str, dict[str, Any]] = {}
     for date_key, rows in sorted(per_date_users.items()):
+        if not is_valid_business_date(date_key):
+            continue
         rows = sorted(rows, key=lambda row: str(row.get("userid") or ""))
         totals_by_type: dict[str, dict[str, int]] = defaultdict(
             lambda: {"lines": 0, "pieces": 0}
@@ -379,6 +390,8 @@ def build_preview_rows(
 
     rows: list[dict[str, Any]] = []
     for business_date, payload in sorted(per_date_payloads.items()):
+        if not is_valid_business_date(business_date):
+            continue
         parsed_path = str(Path(parsed_dir) / f"rf2_userls_{business_date}.json")
         userls_daily_path = str(Path(userls_daily_dir) / f"{business_date}.json")
         daily_path = str(Path(derived_daily_dir) / f"{business_date}.json")
@@ -545,6 +558,24 @@ def apply_job(
         business_date = preview_row["businessDate"]
         payload = per_date_payloads.get(business_date)
         details = dict(preview_row.get("details") or {})
+
+        if not is_valid_business_date(business_date):
+            result_rows.append(
+                {
+                    "businessDate": business_date,
+                    "status": "skipped",
+                    "action": "skip",
+                    "parsedPath": str(Path(parsed_dir) / f"rf2_userls_{business_date}.json"),
+                    "userlsDailyPath": str(userls_daily_dir / f"{business_date}.json"),
+                    "dailyEnrichedPath": str(daily_enriched_dir / f"{business_date}.json"),
+                    "details": {
+                        **details,
+                        "reason": "invalid_business_date",
+                    },
+                }
+            )
+            counts["skipped"] += 1
+            continue
         for stale_key in (
             "reason",
             "buildUserlsDailySummary",
