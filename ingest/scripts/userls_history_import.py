@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from common import save_json
-from db_sqlite import connect, utc_now_iso
+from db_sqlite import connect, utc_now_iso, upsert_dataset_component
 from ingest_manifest import get_active_run
 from parse_rf2_userls import parse_file
 
@@ -31,6 +31,25 @@ def run_cmd(cmd: list[str]) -> dict[str, Any]:
         "stdout": result.stdout,
         "stderr": result.stderr,
     }
+
+
+def mark_component(
+    conn,
+    *,
+    business_date: str,
+    component_type: str,
+    status: str,
+    source_path: str | Path | None = None,
+    details: dict[str, Any] | None = None,
+) -> None:
+    upsert_dataset_component(
+        conn,
+        business_date=business_date,
+        component_type=component_type,
+        status=status,
+        source_path=source_path,
+        details=details or {},
+    )
 
 
 def ensure_history_schema(conn) -> None:
@@ -590,6 +609,23 @@ def apply_job(
             result_rows.append(row_out)
             continue
 
+        mark_component(
+            conn,
+            business_date=business_date,
+            component_type="rf2_userls",
+            status="ready",
+            source_path=parsed_path,
+            details={
+                "sourceMode": "historical_userls_import",
+                "jobId": job_id,
+                "mode": mode,
+                "action": action,
+                "sourceFile": job["sourcePath"],
+                "parsedPath": str(parsed_path),
+                "userlsDailyPath": str(userls_daily_path),
+            },
+        )
+
         if daily_path.exists():
             merge_step = run_cmd(
                 [
@@ -607,9 +643,44 @@ def apply_job(
                 counts["failed"] += 1
                 result_rows.append(row_out)
                 continue
+
+            mark_component(
+                conn,
+                business_date=business_date,
+                component_type="daily_enriched",
+                status="ready",
+                source_path=daily_enriched_path,
+                details={
+                    "sourceMode": "historical_userls_import",
+                    "jobId": job_id,
+                    "mode": mode,
+                    "action": action,
+                    "sourceFile": job["sourcePath"],
+                    "dailyPath": str(daily_path),
+                    "userlsDailyPath": str(userls_daily_path),
+                    "dailyEnrichedPath": str(daily_enriched_path),
+                },
+            )
         else:
             row_out["details"]["dailyExists"] = False
             row_out["details"]["mergeSkippedReason"] = "daily_missing"
+            mark_component(
+                conn,
+                business_date=business_date,
+                component_type="daily_enriched",
+                status="missing",
+                source_path=daily_enriched_path,
+                details={
+                    "sourceMode": "historical_userls_import",
+                    "jobId": job_id,
+                    "mode": mode,
+                    "action": action,
+                    "sourceFile": job["sourcePath"],
+                    "dailyPath": str(daily_path),
+                    "userlsDailyPath": str(userls_daily_path),
+                    "reason": "daily_missing",
+                },
+            )
 
         counts["applied"] += 1
         result_rows.append(row_out)
