@@ -576,6 +576,24 @@ def apply_job(
             )
             counts["skipped"] += 1
             continue
+
+        if not is_valid_business_date(business_date):
+            result_rows.append(
+                {
+                    "businessDate": business_date,
+                    "status": "skipped",
+                    "action": "skip",
+                    "parsedPath": str(Path(parsed_dir) / f"rf2_userls_{business_date}.json"),
+                    "userlsDailyPath": str(userls_daily_dir / f"{business_date}.json"),
+                    "dailyEnrichedPath": str(daily_enriched_dir / f"{business_date}.json"),
+                    "details": {
+                        **details,
+                        "reason": "invalid_business_date",
+                    },
+                }
+            )
+            counts["skipped"] += 1
+            continue
         for stale_key in (
             "reason",
             "buildUserlsDailySummary",
