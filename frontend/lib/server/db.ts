@@ -262,3 +262,151 @@ export function listSnapshotsInRange<T>(
   }));
 }
 
+
+
+type UploadListItem = {
+  businessDate: string;
+  reportType: string;
+  sourcePath: string;
+  checksum: string | null;
+  sizeBytes: number | null;
+  status: string;
+  runId: string | null;
+  duplicateOfRunId: string | null;
+  manifestPath: string | null;
+  createdAt: string;
+  details: unknown | null;
+};
+
+type DatasetComponentListItem = {
+  businessDate: string;
+  componentType: string;
+  status: string;
+  sourcePath: string | null;
+  updatedAt: string;
+  details: unknown | null;
+};
+
+function parseOptionalJson<T>(value: string | null | undefined): T | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
+export function listRecentUploads({
+  limit = 100,
+  businessDate,
+  startDate,
+  endDate,
+}: {
+  limit?: number;
+  businessDate?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+} = {}): UploadListItem[] {
+  const safeLimit = Math.max(1, Math.min(Math.trunc(limit || 100), 500));
+  const db = getDb();
+
+  const rows = db
+    .prepare(
+      `
+        SELECT
+          business_date,
+          report_type,
+          source_path,
+          checksum,
+          size_bytes,
+          status,
+          run_id,
+          duplicate_of_run_id,
+          manifest_path,
+          created_at,
+          details_json
+        FROM uploads
+        WHERE (? IS NULL OR business_date = ?)
+          AND (? IS NULL OR business_date >= ?)
+          AND (? IS NULL OR business_date <= ?)
+        ORDER BY created_at DESC
+        LIMIT ?
+      `
+    )
+    .all(
+      businessDate ?? null,
+      businessDate ?? null,
+      startDate ?? null,
+      startDate ?? null,
+      endDate ?? null,
+      endDate ?? null,
+      safeLimit
+    ) as Array<{
+      business_date: string;
+      report_type: string;
+      source_path: string;
+      checksum: string | null;
+      size_bytes: number | null;
+      status: string;
+      run_id: string | null;
+      duplicate_of_run_id: string | null;
+      manifest_path: string | null;
+      created_at: string;
+      details_json: string | null;
+    }>;
+
+  return rows.map((row) => ({
+    businessDate: row.business_date,
+    reportType: row.report_type,
+    sourcePath: row.source_path,
+    checksum: row.checksum,
+    sizeBytes: row.size_bytes,
+    status: row.status,
+    runId: row.run_id,
+    duplicateOfRunId: row.duplicate_of_run_id,
+    manifestPath: row.manifest_path,
+    createdAt: row.created_at,
+    details: parseOptionalJson(row.details_json),
+  }));
+}
+
+export function listDatasetComponentsInRange(
+  startKey: string,
+  endKey: string
+): DatasetComponentListItem[] {
+  const db = getDb();
+
+  const rows = db
+    .prepare(
+      `
+        SELECT
+          business_date,
+          component_type,
+          status,
+          source_path,
+          updated_at,
+          details_json
+        FROM dataset_components
+        WHERE business_date >= ?
+          AND business_date <= ?
+        ORDER BY business_date DESC, component_type ASC
+      `
+    )
+    .all(startKey, endKey) as Array<{
+      business_date: string;
+      component_type: string;
+      status: string;
+      source_path: string | null;
+      updated_at: string;
+      details_json: string | null;
+    }>;
+
+  return rows.map((row) => ({
+    businessDate: row.business_date,
+    componentType: row.component_type,
+    status: row.status,
+    sourcePath: row.source_path,
+    updatedAt: row.updated_at,
+    details: parseOptionalJson(row.details_json),
+  }));
+}

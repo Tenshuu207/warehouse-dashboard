@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { getRangeData } from "@/lib/data-resolver";
 
 type DashboardData = Awaited<ReturnType<typeof getRangeData>>;
@@ -12,6 +13,14 @@ function fmt(value: number | null | undefined, digits = 0) {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   });
+}
+
+function isIsoDate(value: string | null | undefined) {
+  return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function normalizeIsoDate(value: string | null | undefined) {
+  return isIsoDate(value) ? value! : null;
 }
 
 function isoToday() {
@@ -33,8 +42,8 @@ function addDays(dateStr: string, days: number) {
 
 function startOfWeek(dateStr: string) {
   const d = new Date(`${dateStr}T00:00:00`);
-  const day = d.getDay(); // 0 Sun ... 6 Sat
-  const diff = day === 0 ? -6 : 1 - day; // Monday start
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, "0");
@@ -65,14 +74,32 @@ function StatCard({
 }
 
 export default function RangeSheetPage() {
-  const defaultEnd = useMemo(() => isoToday(), []);
-  const defaultStart = useMemo(() => addDays(defaultEnd, -6), [defaultEnd]);
+  const searchParams = useSearchParams();
+
+  const queryStart = normalizeIsoDate(searchParams.get("start"));
+  const queryEnd = normalizeIsoDate(searchParams.get("end"));
+
+  const defaultEnd = useMemo(() => {
+    if (queryEnd) return queryEnd;
+    if (queryStart) return queryStart;
+    return isoToday();
+  }, [queryEnd, queryStart]);
+
+  const defaultStart = useMemo(() => {
+    if (queryStart) return queryStart;
+    return addDays(defaultEnd, -6);
+  }, [queryStart, defaultEnd]);
 
   const [start, setStart] = useState(defaultStart);
   const [end, setEnd] = useState(defaultEnd);
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setStart(defaultStart);
+    setEnd(defaultEnd);
+  }, [defaultStart, defaultEnd]);
 
   async function load(nextStart: string, nextEnd: string) {
     try {
@@ -105,7 +132,7 @@ export default function RangeSheetPage() {
             Custom date range
           </h1>
           <p className="mt-1 text-sm text-slate-600">
-            Review a custom range using the new DB-backed aggregation path.
+            Review a custom range using the DB-backed aggregation path.
           </p>
         </div>
 
@@ -115,6 +142,12 @@ export default function RangeSheetPage() {
             className="rounded-full border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             Weekly Sheet
+          </Link>
+          <Link
+            href={`/range-sheet?start=${startOfWeek(start)}&end=${endOfWeek(start)}`}
+            className="rounded-full border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Open this week
           </Link>
           <Link
             href="/daily-sheet"
@@ -193,7 +226,8 @@ export default function RangeSheetPage() {
           {sourceDates.length ? (
             <>
               {" "}
-              · Source dates: <span className="font-medium text-slate-700">{sourceDates.join(", ")}</span>
+              · Source dates:{" "}
+              <span className="font-medium text-slate-700">{sourceDates.join(", ")}</span>
             </>
           ) : null}
         </div>
@@ -269,8 +303,8 @@ export default function RangeSheetPage() {
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-            This is the first UI bridge for custom ranges. Once this feels right, the same controls can
-            be folded into the weekly sheet so weekly and custom range become one navigation model.
+            Weekly Sheet is still the current enriched weekly workflow. Range Sheet is now the bridge for
+            custom windows and future weekly/date-range unification.
           </div>
         </div>
       ) : (

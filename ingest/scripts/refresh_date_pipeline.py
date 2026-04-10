@@ -124,6 +124,7 @@ def refresh_daily(
     return {"status": "rebuilt", "output": str(out_path), "details": payload}
 
 
+
 def refresh_daily_enriched(
     *,
     index_dir: str,
@@ -141,16 +142,18 @@ def refresh_daily_enriched(
     userls_daily_path = userls_daily_dir / f"{business_date}.json"
     daily_enriched_path = daily_enriched_dir / f"{business_date}.json"
 
-    if not active_userls:
-      mark_component(
-          conn,
-          business_date=business_date,
-          component_type="daily_enriched",
-          status="missing",
-          source_path=daily_enriched_path,
-          details={"reason": "no_active_userls"},
-      )
-      return {"status": "skipped", "reason": "no_active_userls"}
+    has_canonical_parsed = parsed_userls_path.exists()
+
+    if not active_userls and not has_canonical_parsed:
+        mark_component(
+            conn,
+            business_date=business_date,
+            component_type="daily_enriched",
+            status="missing",
+            source_path=daily_enriched_path,
+            details={"reason": "no_active_userls_or_canonical_parsed"},
+        )
+        return {"status": "skipped", "reason": "no_active_userls_or_canonical_parsed"}
 
     if not daily_path.exists():
         mark_component(
@@ -168,26 +171,48 @@ def refresh_daily_enriched(
     daily_enriched_dir.mkdir(parents=True, exist_ok=True)
 
     steps = []
+    source_details: dict[str, str | None] = {
+        "sourceMode": "canonical_parsed"
+        if has_canonical_parsed and not active_userls
+        else "raw_active_userls",
+        "userlsSourcePath": active_userls["sourcePath"]
+        if active_userls
+        else str(parsed_userls_path),
+        "runId": active_userls.get("runId") if active_userls else None,
+    }
 
-    step = run_cmd(
-        [
-            sys.executable,
-            "ingest/scripts/parse_rf2_userls.py",
-            active_userls["sourcePath"],
-            str(parsed_userls_path),
-        ]
-    )
-    steps.append({"stage": "parse_rf2_userls", **step})
-    if step["returncode"] != 0:
-        mark_component(
-            conn,
-            business_date=business_date,
-            component_type="daily_enriched",
-            status="failed",
-            source_path=daily_enriched_path,
-            details={"stage": "parse_rf2_userls", "stderr": step["stderr"]},
+    if active_userls:
+        step = run_cmd(
+            [
+                sys.executable,
+                "ingest/scripts/parse_rf2_userls.py",
+                active_userls["sourcePath"],
+                str(parsed_userls_path),
+            ]
         )
-        return {"status": "failed", "stage": "parse_rf2_userls", "details": steps}
+        steps.append({"stage": "parse_rf2_userls", **step})
+        if step["returncode"] != 0:
+            mark_component(
+                conn,
+                business_date=business_date,
+                component_type="daily_enriched",
+                status="failed",
+                source_path=daily_enriched_path,
+                details={"stage": "parse_rf2_userls", "stderr": step["stderr"]},
+            )
+            return {"status": "failed", "stage": "parse_rf2_userls", "details": steps}
+    else:
+        steps.append(
+            {
+                "stage": "parse_rf2_userls",
+                "returncode": 0,
+                "stdout": "",
+                "stderr": "",
+                "cmd": None,
+                "skipped": True,
+                "reason": "using_existing_canonical_parsed",
+            }
+        )
 
     step = run_cmd(
         [
@@ -238,16 +263,15 @@ def refresh_daily_enriched(
         source_path=daily_enriched_path,
         details={
             "stage": "daily_enriched",
-            "userlsSourcePath": active_userls["sourcePath"],
-            "runId": active_userls.get("runId"),
+            **source_details,
         },
     )
     return {
         "status": "rebuilt",
         "output": str(daily_enriched_path),
         "details": steps,
+        "source": source_details,
     }
-
 
 def refresh_weekly(
     *,

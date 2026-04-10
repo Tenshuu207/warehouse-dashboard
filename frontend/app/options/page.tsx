@@ -42,7 +42,6 @@ export default function OptionsPage() {
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900 p-3 md:p-4">
       <div className="mx-auto max-w-6xl space-y-4">
-
         <section className="rounded-2xl bg-white border shadow-sm p-4">
           <h2 className="text-xl font-bold">Options</h2>
           <p className="mt-1 text-xs text-slate-600">
@@ -106,6 +105,24 @@ export default function OptionsPage() {
               description="Allowed review status values used on review screens."
               href="/options/review-statuses"
               buttonLabel="Edit Review Statuses"
+            />
+          </div>
+        </section>
+
+        <section className="rounded-2xl bg-white border shadow-sm p-4 space-y-4">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800">Data & Ingestion</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Inspect raw upload coverage, derived snapshot readiness, and recent ingest activity.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <SettingsCard
+              title="Ingestion"
+              description="See which dates have ForkL2, ForkSTDL, UserLS, daily, and weekly coverage."
+              href="/options/ingestion"
+              buttonLabel="Open Ingestion Status"
             />
           </div>
         </section>

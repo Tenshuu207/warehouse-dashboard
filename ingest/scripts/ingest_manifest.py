@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from db_sqlite import connect, record_upload
+from db_sqlite import connect, record_upload, upsert_dataset_component
 
 
 REPORT_TYPES = {"b_forkl2", "rf2_forkstdl", "rf2_userls"}
@@ -118,6 +118,19 @@ def register_ingest(
                 manifest_path=mpath,
                 details={"activeRun": report_entry.get("activeRun")},
             )
+            upsert_dataset_component(
+                conn,
+                business_date=business_date,
+                component_type=report_type,
+                status="ready",
+                source_path=existing_same_checksum.get("sourcePath") or source,
+                details={
+                    "runId": existing_same_checksum.get("runId"),
+                    "activeRun": report_entry.get("activeRun"),
+                    "kind": "raw_upload",
+                    "duplicate": True,
+                },
+            )
         finally:
             conn.close()
 
@@ -166,6 +179,19 @@ def register_ingest(
             run_id=run_id,
             manifest_path=mpath,
             details={"activeRun": run_id},
+        )
+        upsert_dataset_component(
+            conn,
+            business_date=business_date,
+            component_type=report_type,
+            status="ready",
+            source_path=source,
+            details={
+                "runId": run_id,
+                "activeRun": run_id,
+                "kind": "raw_upload",
+                "duplicate": False,
+            },
         )
     finally:
         conn.close()
