@@ -1,19 +1,24 @@
 from __future__ import annotations
 
 import json
-import subprocess
+import subprocess  # nosec B404
 import sys
+from typing import Any
 from pathlib import Path
 
-from ingest_manifest import load_json, get_active_run
-from ingest_manifest import load_json, save_json
-
+from ingest_manifest import get_active_run, load_json, save_json
 
 REQUIRED_FOR_DAILY = ["b_forkl2", "rf2_forkstdl"]
 
 
 def run_cmd(cmd: list[str]) -> None:
-    result = subprocess.run(cmd, check=False, text=True)
+    if not cmd or any(not isinstance(part, str) for part in cmd):
+        raise ValueError("cmd must be a non-empty list[str]")
+    result = subprocess.run(  # nosec B603 - trusted internal command list
+        cmd,
+        check=False,
+        text=True,
+    )
     if result.returncode != 0:
         raise RuntimeError(f"Command failed: {' '.join(cmd)}")
 
@@ -41,7 +46,7 @@ def build_daily_from_manifest(
     if not manifest:
         raise FileNotFoundError(f"Manifest not found: {manifest_file}")
 
-    active = {}
+    active: dict[str, dict[str, Any] | None] = {}
     for report_type in ["b_forkl2", "rf2_forkstdl", "rf2_userls"]:
         active[report_type] = get_active_run(index_dir, business_date, report_type)
 
@@ -54,6 +59,13 @@ def build_daily_from_manifest(
             "missingReports": missing,
         }
 
+    b_run = active["b_forkl2"]
+    f_run = active["rf2_forkstdl"]
+    userls_run = active.get("rf2_userls")
+
+    if b_run is None or f_run is None:
+        raise RuntimeError("Required active runs missing after validation")
+
     parsed_b = Path(parsed_dir) / f"b_forkl2_{business_date}.json"
     parsed_f = Path(parsed_dir) / f"rf2_forkstdl_{business_date}.json"
     daily_out = Path(derived_daily_dir) / f"{business_date}.json"
@@ -62,42 +74,48 @@ def build_daily_from_manifest(
     ensure_parent(parsed_f)
     ensure_parent(daily_out)
 
-    run_cmd([
-        sys.executable,
-        "ingest/scripts/parse_b_forkl2.py",
-        active["b_forkl2"]["sourcePath"],
-        str(parsed_b),
-    ])
+    run_cmd(
+        [
+            sys.executable,
+            "ingest/scripts/parse_b_forkl2.py",
+            b_run["sourcePath"],
+            str(parsed_b),
+        ]
+    )
 
-    run_cmd([
-        sys.executable,
-        "ingest/scripts/parse_rf2_forkstdl.py",
-        active["rf2_forkstdl"]["sourcePath"],
-        area_map_path,
-        str(parsed_f),
-    ])
+    run_cmd(
+        [
+            sys.executable,
+            "ingest/scripts/parse_rf2_forkstdl.py",
+            f_run["sourcePath"],
+            area_map_path,
+            str(parsed_f),
+        ]
+    )
 
-    run_cmd([
-        sys.executable,
-        "ingest/scripts/build_daily_dashboard.py",
-        str(parsed_b),
-        str(parsed_f),
-        roles_path,
-        review_dir,
-        options_path,
-        str(daily_out),
-    ])
+    run_cmd(
+        [
+            sys.executable,
+            "ingest/scripts/build_daily_dashboard.py",
+            str(parsed_b),
+            str(parsed_f),
+            roles_path,
+            review_dir,
+            options_path,
+            str(daily_out),
+        ]
+    )
 
     daily = load_json(daily_out, {})
     daily["sourceRuns"] = {
-        "b_forkl2": active["b_forkl2"]["runId"] if active.get("b_forkl2") else None,
-        "rf2_forkstdl": active["rf2_forkstdl"]["runId"] if active.get("rf2_forkstdl") else None,
-        "rf2_userls": active["rf2_userls"]["runId"] if active.get("rf2_userls") else None,
+        "b_forkl2": b_run["runId"],
+        "rf2_forkstdl": f_run["runId"],
+        "rf2_userls": userls_run["runId"] if userls_run else None,
     }
     daily["sourcePaths"] = {
-        "b_forkl2": active["b_forkl2"]["sourcePath"] if active.get("b_forkl2") else None,
-        "rf2_forkstdl": active["rf2_forkstdl"]["sourcePath"] if active.get("rf2_forkstdl") else None,
-        "rf2_userls": active["rf2_userls"]["sourcePath"] if active.get("rf2_userls") else None,
+        "b_forkl2": b_run["sourcePath"],
+        "rf2_forkstdl": f_run["sourcePath"],
+        "rf2_userls": userls_run["sourcePath"] if userls_run else None,
     }
     save_json(daily_out, daily)
 
@@ -117,13 +135,15 @@ def build_weekly_if_possible(
     weekly_out = Path(derived_weekly_dir) / f"{week_start}.json"
     ensure_parent(weekly_out)
 
-    run_cmd([
-        sys.executable,
-        "ingest/scripts/build_weekly_dashboard.py",
-        derived_daily_dir,
-        week_start,
-        str(weekly_out),
-    ])
+    run_cmd(
+        [
+            sys.executable,
+            "ingest/scripts/build_weekly_dashboard.py",
+            derived_daily_dir,
+            week_start,
+            str(weekly_out),
+        ]
+    )
 
     weekly = load_json(weekly_out, {})
     return {

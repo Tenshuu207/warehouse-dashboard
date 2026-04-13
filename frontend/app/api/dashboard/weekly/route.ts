@@ -1,8 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { resolveNearestSnapshot } from "@/lib/server/db";
+import {
+  addDaysIso,
+  buildDashboardRangeFromDailySnapshots,
+  isDateLike,
+} from "@/lib/server/dashboard-range";
 
-async function resolveNearestFile(dirPath: string, requestedKey: string): Promise<{ filePath: string; resolvedKey: string } | null> {
+async function resolveNearestFile(
+  dirPath: string,
+  requestedKey: string
+): Promise<{ filePath: string; resolvedKey: string } | null> {
   const entries = await fs.readdir(dirPath);
   const keys = entries
     .filter((name) => name.endsWith(".json"))
@@ -30,14 +39,42 @@ async function resolveNearestFile(dirPath: string, requestedKey: string): Promis
 export async function GET(req: NextRequest) {
   const weekStart = req.nextUrl.searchParams.get("weekStart") || "2026-04-03";
 
-  try {
-    const dirPath = path.join(
-      process.cwd(),
-      "..",
-      "ingest",
-      "derived",
-      "weekly"
+  if (!isDateLike(weekStart)) {
+    return NextResponse.json(
+      { error: "invalid_week_start", details: "Use YYYY-MM-DD for weekStart." },
+      { status: 400 }
     );
+  }
+
+  const requestedWeekEnd = addDaysIso(weekStart, 6);
+
+  try {
+    const ranged = buildDashboardRangeFromDailySnapshots(weekStart, requestedWeekEnd);
+    if (ranged) {
+      return NextResponse.json({
+        ...ranged,
+        requestedWeekStart: weekStart,
+        requestedWeekEnd,
+        resolvedWeekStart: ranged.resolvedStart || weekStart,
+        resolvedWeekEnd: ranged.resolvedEnd || requestedWeekEnd,
+        usedFallback: (ranged.resolvedStart || weekStart) !== weekStart,
+        source: "sqlite-range",
+      });
+    }
+
+    const resolvedDb = resolveNearestSnapshot<Record<string, unknown>>("weekly", weekStart);
+    if (resolvedDb) {
+      return NextResponse.json({
+        ...resolvedDb.payload,
+        requestedWeekStart: weekStart,
+        requestedWeekEnd,
+        resolvedWeekStart: resolvedDb.resolvedKey,
+        usedFallback: resolvedDb.resolvedKey !== weekStart,
+        source: "sqlite",
+      });
+    }
+
+    const dirPath = path.join(process.cwd(), "..", "ingest", "derived", "weekly");
 
     const resolved = await resolveNearestFile(dirPath, weekStart);
     if (!resolved) {
@@ -57,8 +94,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       ...data,
       requestedWeekStart: weekStart,
+      requestedWeekEnd,
       resolvedWeekStart: resolved.resolvedKey,
       usedFallback: resolved.resolvedKey !== weekStart,
+      source: "json",
     });
   } catch (error) {
     return NextResponse.json(

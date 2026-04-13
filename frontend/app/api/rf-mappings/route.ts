@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { getJsonValue, upsertJsonValue } from "@/lib/server/db";
 
 type RfMapping = {
   rfUsername: string;
@@ -28,6 +29,11 @@ function isDateLike(value: string): boolean {
 }
 
 async function readEmployeeIds(): Promise<Set<string>> {
+  const fromDb = getJsonValue<{ employees?: Record<string, unknown> }>("config", "employees");
+  if (fromDb?.employees && typeof fromDb.employees === "object") {
+    return new Set(Object.keys(fromDb.employees));
+  }
+
   try {
     const raw = await fs.readFile(employeesFilePath(), "utf-8");
     const data = JSON.parse(raw);
@@ -92,6 +98,11 @@ function normalizeData(input: unknown, validEmployeeIds: Set<string>): RfMapping
 }
 
 async function readMappings(validEmployeeIds: Set<string>): Promise<RfMappingsData> {
+  const fromDb = getJsonValue<RfMappingsData>("config", "rf-mappings");
+  if (fromDb) {
+    return normalizeData(fromDb, validEmployeeIds);
+  }
+
   try {
     const raw = await fs.readFile(mappingsFilePath(), "utf-8");
     return normalizeData(JSON.parse(raw), validEmployeeIds);
@@ -117,6 +128,7 @@ export async function POST(req: NextRequest) {
 
     await fs.mkdir(path.dirname(mappingsFilePath()), { recursive: true });
     await fs.writeFile(mappingsFilePath(), JSON.stringify(data, null, 2), "utf-8");
+    upsertJsonValue("config", "rf-mappings", data, mappingsFilePath());
 
     return NextResponse.json({
       status: "saved",

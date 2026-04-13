@@ -87,7 +87,16 @@ export default function PerformanceEnrichedCore() {
       }
     }
 
-    if (selectedWeek) load();
+    if (!selectedWeek) {
+      setLoading(false);
+      setError("Select a date to load enriched performance data");
+      setData(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    load();
 
     return () => {
       cancelled = true;

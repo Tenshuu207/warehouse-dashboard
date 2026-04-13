@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { resolveNearestSnapshot } from "@/lib/server/db";
 
 async function resolveNearestFile(dirPath: string, requestedKey: string): Promise<{ filePath: string; resolvedKey: string } | null> {
   const entries = await fs.readdir(dirPath);
@@ -31,13 +32,18 @@ export async function GET(req: NextRequest) {
   const date = req.nextUrl.searchParams.get("date") || "2026-04-03";
 
   try {
-    const dirPath = path.join(
-      process.cwd(),
-      "..",
-      "ingest",
-      "derived",
-      "daily"
-    );
+    const resolvedDb = resolveNearestSnapshot<Record<string, unknown>>("daily", date);
+    if (resolvedDb) {
+      return NextResponse.json({
+        ...resolvedDb.payload,
+        requestedDate: date,
+        resolvedDate: resolvedDb.resolvedKey,
+        usedFallback: resolvedDb.resolvedKey !== date,
+        source: "sqlite",
+      });
+    }
+
+    const dirPath = path.join(process.cwd(), "..", "ingest", "derived", "daily");
 
     const resolved = await resolveNearestFile(dirPath, date);
     if (!resolved) {
@@ -59,6 +65,7 @@ export async function GET(req: NextRequest) {
       requestedDate: date,
       resolvedDate: resolved.resolvedKey,
       usedFallback: resolved.resolvedKey !== date,
+      source: "json",
     });
   } catch (error) {
     return NextResponse.json(

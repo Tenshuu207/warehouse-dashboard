@@ -290,7 +290,17 @@ export default function PerformanceMobileSummary() {
       }
     }
 
-    if (selectedWeek) load();
+    if (!selectedWeek) {
+      setLoading(false);
+      setError("Select a date to load performance");
+      setOperators([]);
+      setStandards(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    load();
 
     return () => {
       cancelled = true;

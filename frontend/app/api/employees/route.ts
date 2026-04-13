@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { getJsonValue, upsertJsonValue } from "@/lib/server/db";
 
 const VALID_STATUSES = ["active", "inactive"] as const;
 
@@ -86,6 +87,11 @@ function normalizeExistingData(input: unknown, validTeams: string[]): EmployeesD
 }
 
 async function readEmployees(validTeams: string[]): Promise<EmployeesData> {
+  const fromDb = getJsonValue<EmployeesData>("config", "employees");
+  if (fromDb) {
+    return normalizeExistingData(fromDb, validTeams);
+  }
+
   try {
     const raw = await fs.readFile(employeesFilePath(), "utf-8");
     return normalizeExistingData(JSON.parse(raw), validTeams);
@@ -108,11 +114,7 @@ function nextEmployeeId(idsInUse: Set<string>): string {
   return employeeId;
 }
 
-function normalizeIncomingBody(
-  input: unknown,
-  validTeams: string[],
-  existingIds: Set<string>
-): EmployeesData {
+function normalizeIncomingBody(input: unknown, validTeams: string[], existingIds: Set<string>): EmployeesData {
   const raw =
     input && typeof input === "object" && !Array.isArray(input)
       ? (input as Record<string, unknown>)
@@ -185,6 +187,7 @@ export async function POST(req: NextRequest) {
 
     await fs.mkdir(path.dirname(employeesFilePath()), { recursive: true });
     await fs.writeFile(employeesFilePath(), JSON.stringify(data, null, 2), "utf-8");
+    upsertJsonValue("config", "employees", data, employeesFilePath());
 
     return NextResponse.json({
       status: "saved",

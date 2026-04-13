@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 import json
-import subprocess
+import subprocess  # nosec B404
 import sys
 from pathlib import Path
 
 from ingest_manifest import register_ingest
 
-
 DAILY_DEPENDENCIES = {"b_forkl2", "rf2_forkstdl"}
 
 
 def run_cmd(cmd: list[str]) -> dict:
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    if not cmd or any(not isinstance(part, str) for part in cmd):
+        raise ValueError("cmd must be a non-empty list[str]")
+    result = subprocess.run(  # nosec B603 - trusted internal command list
+        cmd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     return {
         "cmd": cmd,
         "returncode": result.returncode,

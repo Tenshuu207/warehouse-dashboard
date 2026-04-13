@@ -6,23 +6,33 @@ from pathlib import Path
 
 from common import clean_spool_text, save_json
 
-
 DATE_RANGE_RE = re.compile(r"From (\d{2}/\d{2}/\d{2}) - (\d{2}/\d{2}/\d{2})")
 USER_RE = re.compile(r"^[a-z0-9]{5,8}\s*$", re.IGNORECASE)
+
+NUM_RE = r"([\d,]+-?)"
 TOTAL_RE = re.compile(
-    r"^Total:\s+"
-    r"(\d+)\s+([\d,]+)\s+"
-    r"(\d+)\s+([\d,]+)\s+"
-    r"(\d+)\s+([\d,]+)\s+"
-    r"(\d+)\s+([\d,]+)\s+"
-    r"(\d+)\s+([\d,]+)\s+"
-    r"(\d+)\s+([\d,]+)\s*$"
+    rf"^Total:\s+"
+    rf"{NUM_RE}\s+{NUM_RE}\s+"
+    rf"{NUM_RE}\s+{NUM_RE}\s+"
+    rf"{NUM_RE}\s+{NUM_RE}\s+"
+    rf"{NUM_RE}\s+{NUM_RE}\s+"
+    rf"{NUM_RE}\s+{NUM_RE}\s+"
+    rf"{NUM_RE}\s+{NUM_RE}\s*$"
 )
 
 
 def mmddyy_to_iso(value: str) -> str:
     mm, dd, yy = value.split("/")
     return f"20{yy}-{mm}-{dd}"
+
+
+def parse_spool_int(value: str) -> int:
+    text = str(value).strip().replace(",", "")
+    if not text:
+        return 0
+    if text.endswith("-") and text[:-1].isdigit():
+        return -int(text[:-1])
+    return int(text)
 
 
 def parse_file(path: str) -> dict:
@@ -42,30 +52,51 @@ def parse_file(path: str) -> dict:
         stripped = line.strip()
 
         if USER_RE.match(stripped) and stripped.lower() not in {
-            "employee", "totals", "moves", "units", "counts", "total"
+            "employee",
+            "totals",
+            "moves",
+            "units",
+            "counts",
+            "total",
         }:
             current_userid = stripped
             continue
 
         tm = TOTAL_RE.match(stripped)
         if current_userid and tm:
-            nums = [int(x.replace(",", "")) for x in tm.groups()]
-            users.append({
-                "userid": current_userid,
-                "letdownPlates": nums[0],
-                "letdownPieces": nums[1],
-                "putawayPlates": nums[2],
-                "putawayPieces": nums[3],
-                "restockPlates": nums[4],
-                "restockPieces": nums[5],
-                "receivingPlates": nums[6],
-                "receivingPieces": nums[7],
-                "countPlates": nums[8],
-                "countPieces": nums[9],
-                "totalPlates": nums[10],
-                "totalPieces": nums[11],
-            })
+            nums = [parse_spool_int(x) for x in tm.groups()]
+            users.append(
+                {
+                    "userid": current_userid,
+                    "letdownPlates": nums[0],
+                    "letdownPieces": nums[1],
+                    "putawayPlates": nums[2],
+                    "putawayPieces": nums[3],
+                    "restockPlates": nums[4],
+                    "restockPieces": nums[5],
+                    "receivingPlates": nums[6],
+                    "receivingPieces": nums[7],
+                    "countPlates": nums[8],
+                    "countPieces": nums[9],
+                    "totalPlates": nums[10],
+                    "totalPieces": nums[11],
+                }
+            )
             current_userid = None
+
+    if not report_date:
+        candidates = [Path(path).parent.name, Path(path).name]
+        for candidate in candidates:
+            match = re.search(r"(20\d{2})-(\d{2})-(\d{2})", candidate)
+            if match:
+                report_date = f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+                break
+
+    if not users:
+        users = []
+
+    if not report_date:
+        raise ValueError("Could not determine report date from b_forkl2 file")
 
     return {
         "reportType": "b_forkl2",

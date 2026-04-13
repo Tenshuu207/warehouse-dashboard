@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/lib/app-state";
+import type { DailyAssignmentsPayload } from "@/lib/assignments/daily-assignments-types";
 import { getWeekData, type ResolvedDashboardData } from "@/lib/data-resolver";
 import {
   resolveOperatorIdentity,
@@ -49,38 +50,32 @@ function cleanDisplayName(op: Record<string, unknown>) {
   return human || candidates.find((value) => value !== "Unknown") || "Unknown";
 }
 
-function resolvedSheetName(
-  op: Record<string, unknown>,
-  selectedWeek: string,
-  employees: Record<string, EmployeeRecord>,
-  mappings: RfMapping[],
-  defaults: Record<string, OperatorDefault>
-) {
-  const resolved = resolveOperatorIdentity({
-    rfUsername: String(op.userid || ""),
-    fallbackName: cleanDisplayName(op),
-    fallbackTeam: String(
-      op.rawAssignedArea ||
-        op.effectiveAssignedArea ||
-        op.assignedArea ||
-        op.area ||
-        ""
-    ),
-    selectedDate: selectedWeek,
-    employees,
-    mappings,
-    defaultTeams: defaults,
-  });
 
-  const display = String(resolved.displayName || "")
-    .replace(/\s*\(RF\)\s*$/i, "")
-    .trim();
+function normalizeNameKey(value: unknown) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, " ");
+}
 
-  return display || cleanDisplayName(op);
+function uniqueSorted(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean))).sort((a, b) => a.localeCompare(b));
+}
+
+function mergeKeyForEmployee(employeeId: string | null, resolvedName: string, userid: string) {
+  if (employeeId) return `emp:${employeeId}`;
+
+  const normalizedName = normalizeNameKey(resolvedName);
+  if (normalizedName) return `name:${normalizedName}`;
+
+  return `rf:${userid}`;
 }
 
 type Row = {
-  userid: string;
+  rowKey: string;
+  employeeId: string | null;
+  primaryUserid: string;
+  rfUsernames: string[];
   name: string;
   role: string;
   area: string;
@@ -146,6 +141,7 @@ function TopListBox({
 export default function AreaSheetView({ area }: { area: string }) {
   const { selectedWeek } = useAppState();
   const [data, setData] = useState<ResolvedDashboardData | null>(null);
+  const [assignments, setAssignments] = useState<DailyAssignmentsPayload | null>(null);
   const [defaults, setDefaults] = useState<Record<string, OperatorDefault>>({});
   const [employees, setEmployees] = useState<Record<string, EmployeeRecord>>({});
   const [mappings, setMappings] = useState<RfMapping[]>([]);
@@ -160,12 +156,17 @@ export default function AreaSheetView({ area }: { area: string }) {
         setLoading(true);
         setError(null);
 
-        const [next, defaultsRes, employeesRes, mappingsRes] = await Promise.all([
+        const [next, assignmentsRes, defaultsRes, employeesRes, mappingsRes] = await Promise.all([
           getWeekData(selectedWeek),
+          fetch(`/api/daily-assignments?date=${selectedWeek}`, { cache: "no-store" }),
           fetch("/api/operator-defaults", { cache: "no-store" }),
           fetch("/api/employees", { cache: "no-store" }),
           fetch("/api/rf-mappings", { cache: "no-store" }),
         ]);
+
+        const assignmentsJson: DailyAssignmentsPayload = assignmentsRes.ok
+          ? await assignmentsRes.json()
+          : { date: selectedWeek, updatedAt: null, sections: [], placements: [] };
 
         const defaultsJson = defaultsRes.ok ? await defaultsRes.json() : { operators: {} };
         const employeesJson = employeesRes.ok ? await employeesRes.json() : { employees: {} };
@@ -173,6 +174,7 @@ export default function AreaSheetView({ area }: { area: string }) {
 
         if (!cancelled) {
           setData(next);
+          setAssignments(assignmentsJson);
           setDefaults(defaultsJson.operators || {});
           setEmployees(employeesJson.employees || {});
           setMappings(Array.isArray(mappingsJson.mappings) ? mappingsJson.mappings : []);
@@ -193,40 +195,120 @@ export default function AreaSheetView({ area }: { area: string }) {
     };
   }, [selectedWeek]);
 
+  const placementsByKey = useMemo(() => {
+    const map = new Map<string, { role?: string; section?: string }>();
+
+    for (const placement of assignments?.placements || []) {
+      if (placement?.assignmentKey) {
+        map.set(placement.assignmentKey, {
+          role: placement.assignedRole ?? undefined,
+          section: placement.assignedSection ?? undefined,
+        });
+      }
+    }
+
+    return map;
+  }, [assignments]);
+
+  const homeTemplates = useMemo(() => {
+    const map = new Map<string, { role?: string; section?: string }>();
+
+    for (const section of assignments?.sections || []) {
+      const resolvedRole = String(section.role || "").trim() || "—";
+      const resolvedSection = String(section.team || "").trim() || "Other";
+
+      for (const employeeName of section.employees || []) {
+        const key = normalizeNameKey(employeeName);
+        if (!key || map.has(key)) continue;
+        map.set(key, {
+          role: resolvedRole,
+          section: resolvedSection,
+        });
+      }
+    }
+
+    return map;
+  }, [assignments]);
+
   const rows = useMemo<Row[]>(() => {
     const ops = (data?.operators ?? []) as Array<Record<string, unknown>>;
+    const grouped = new Map<string, Row>();
 
-    return ops
-      .map((op) => {
-        const letdownPlates = safeNum(op.letdownPlates);
-        const letdownPieces = safeNum(op.letdownPieces);
-        const putawayPlates = safeNum(op.putawayPlates);
-        const putawayPieces = safeNum(op.putawayPieces);
-        const restockPlates = safeNum(op.restockPlates);
-        const restockPieces = safeNum(op.restockPieces);
-        const receivingPlates = safeNum(op.receivingPlates);
-        const receivingPieces = safeNum(op.receivingPieces);
+    for (const op of ops) {
+      const userid = String(op.userid || "").trim();
+      if (!userid) continue;
 
-        const totalPlates = letdownPlates + putawayPlates + restockPlates;
-        const totalPieces = letdownPieces + putawayPieces + restockPieces;
+      const letdownPlates = safeNum(op.letdownPlates);
+      const letdownPieces = safeNum(op.letdownPieces);
+      const putawayPlates = safeNum(op.putawayPlates);
+      const putawayPieces = safeNum(op.putawayPieces);
+      const restockPlates = safeNum(op.restockPlates);
+      const restockPieces = safeNum(op.restockPieces);
+      const receivingPlates = safeNum(op.receivingPlates);
+      const receivingPieces = safeNum(op.receivingPieces);
 
-        const rowArea = String(
-          op.effectivePerformanceArea ||
-            op.rawDominantArea ||
-            op.effectiveAssignedArea ||
-            op.area ||
-            "Other"
-        );
+      const totalPlates = letdownPlates + putawayPlates + restockPlates;
+      const totalPieces = letdownPieces + putawayPieces + restockPieces;
 
-        return {
-          userid: String(op.userid || ""),
-          name: resolvedSheetName(op, selectedWeek, employees, mappings, defaults),
-          role: String(
-            op.effectiveAssignedRole ||
-              op.currentRole ||
-              op.rawAssignedRole ||
-              "—"
-          ),
+      const rowArea = String(
+        op.effectivePerformanceArea ||
+          op.rawDominantArea ||
+          op.effectiveAssignedArea ||
+          op.area ||
+          "Other"
+      );
+
+      if (!(rowArea === area && (totalPlates > 0 || receivingPlates > 0))) {
+        continue;
+      }
+
+      const fallbackName = cleanDisplayName(op);
+      const fallbackTeam = String(
+        op.rawAssignedArea ||
+          op.effectiveAssignedArea ||
+          op.assignedArea ||
+          op.area ||
+          ""
+      );
+
+      const resolved = resolveOperatorIdentity({
+        rfUsername: userid,
+        fallbackName,
+        fallbackTeam,
+        selectedDate: selectedWeek,
+        employees,
+        mappings,
+        defaultTeams: defaults,
+      });
+
+      const name =
+        String(resolved.displayName || "")
+          .replace(/\s*\(RF\)\s*$/i, "")
+          .trim() || fallbackName;
+
+      const employeeId = resolved.employeeId || null;
+      const rowKey = mergeKeyForEmployee(employeeId, name || fallbackName, userid);
+      const placement = placementsByKey.get(rowKey);
+      const homeTemplate = homeTemplates.get(normalizeNameKey(name));
+
+      const role = String(
+        placement?.role ||
+          op.effectiveAssignedRole ||
+          homeTemplate?.role ||
+          op.currentRole ||
+          op.rawAssignedRole ||
+          "—"
+      );
+
+      const existing = grouped.get(rowKey);
+      if (!existing) {
+        grouped.set(rowKey, {
+          rowKey,
+          employeeId,
+          primaryUserid: userid,
+          rfUsernames: [userid],
+          name,
+          role,
           area: rowArea,
           letdownPlates,
           letdownPieces,
@@ -239,14 +321,37 @@ export default function AreaSheetView({ area }: { area: string }) {
           receivingPlates,
           receivingPieces,
           avgPcsPerPlate: avgPcsPerPlate(totalPieces, totalPlates),
-        };
-      })
-      .filter(
-        (row) =>
-          row.area === area && (row.totalPlates > 0 || row.receivingPlates > 0)
-      )
-      .sort((a, b) => b.totalPieces - a.totalPieces);
-  }, [data, area, selectedWeek, employees, mappings, defaults]);
+        });
+        continue;
+      }
+
+      existing.rfUsernames = uniqueSorted([...existing.rfUsernames, userid]);
+      existing.letdownPlates += letdownPlates;
+      existing.letdownPieces += letdownPieces;
+      existing.putawayPlates += putawayPlates;
+      existing.putawayPieces += putawayPieces;
+      existing.restockPlates += restockPlates;
+      existing.restockPieces += restockPieces;
+      existing.totalPlates += totalPlates;
+      existing.totalPieces += totalPieces;
+      existing.receivingPlates += receivingPlates;
+      existing.receivingPieces += receivingPieces;
+      existing.avgPcsPerPlate = avgPcsPerPlate(existing.totalPieces, existing.totalPlates);
+
+      if (employeeId && !existing.employeeId) {
+        existing.employeeId = employeeId;
+        existing.name = name;
+        existing.role = role;
+        existing.primaryUserid = userid;
+      }
+    }
+
+    return [...grouped.values()].sort((a, b) => {
+      const pieceDiff = b.totalPieces - a.totalPieces;
+      if (pieceDiff !== 0) return pieceDiff;
+      return a.name.localeCompare(b.name);
+    });
+  }, [data, area, selectedWeek, employees, mappings, defaults, placementsByKey, homeTemplates]);
 
   const totals = useMemo(() => {
     return rows.reduce(
@@ -414,15 +519,17 @@ export default function AreaSheetView({ area }: { area: string }) {
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.userid} className="bg-white">
+                  <tr key={row.rowKey} className="bg-white">
                     <td className="border border-slate-900 px-3 py-1.5 font-medium">
                       <Link
-                        href={`/operators/${encodeURIComponent(row.userid)}`}
+                        href={`/operators/${encodeURIComponent(row.primaryUserid)}`}
                         className="hover:underline"
                       >
                         {row.name}
                       </Link>
-                      <div className="text-[11px] text-slate-500">{row.userid}</div>
+                      <div className="text-[11px] text-slate-500">
+                        {row.rfUsernames.join(", ")}
+                      </div>
                     </td>
                     <td className="border border-slate-900 px-3 py-1.5">{row.role}</td>
                     <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
@@ -560,10 +667,10 @@ export default function AreaSheetView({ area }: { area: string }) {
                 </thead>
                 <tbody>
                   {topReceiving.map((row) => (
-                    <tr key={`recv-${row.userid}`}>
+                    <tr key={`recv-${row.rowKey}`}>
                       <td className="border border-slate-900 px-3 py-1.5 font-medium">
                         <Link
-                          href={`/operators/${encodeURIComponent(row.userid)}`}
+                          href={`/operators/${encodeURIComponent(row.primaryUserid)}`}
                           className="hover:underline"
                         >
                           {row.name}

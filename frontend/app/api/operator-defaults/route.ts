@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
+import { getJsonValue, upsertJsonValue } from "@/lib/server/db";
 
 type OperatorDefault = {
   name?: string;
@@ -66,6 +67,11 @@ function normalizeData(input: unknown, validTeams: string[]): OperatorDefaultsDa
 }
 
 async function readDefaults(validTeams: string[]): Promise<OperatorDefaultsData> {
+  const fromDb = getJsonValue<OperatorDefaultsData>("config", "operator-defaults");
+  if (fromDb) {
+    return normalizeData(fromDb, validTeams);
+  }
+
   try {
     const raw = await fs.readFile(defaultsFilePath(), "utf-8");
     return normalizeData(JSON.parse(raw), validTeams);
@@ -92,6 +98,7 @@ export async function POST(req: NextRequest) {
 
     await fs.mkdir(path.dirname(defaultsFilePath()), { recursive: true });
     await fs.writeFile(defaultsFilePath(), JSON.stringify(data, null, 2), "utf-8");
+    upsertJsonValue("config", "operator-defaults", data, defaultsFilePath());
 
     return NextResponse.json({
       status: "saved",

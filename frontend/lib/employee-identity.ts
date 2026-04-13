@@ -31,6 +31,10 @@ function appliesToDate(mapping: RfMapping, date: string): boolean {
   return true;
 }
 
+function normalizeRfUsername(value: string): string {
+  return String(value || "").trim().toLowerCase();
+}
+
 export function resolveOperatorIdentity({
   rfUsername,
   fallbackName,
@@ -48,8 +52,14 @@ export function resolveOperatorIdentity({
   mappings: RfMapping[];
   defaultTeams?: Record<string, OperatorDefault>;
 }) {
+  const normalizedRfUsername = normalizeRfUsername(rfUsername);
+
   const matches = mappings
-    .filter((m) => m.rfUsername === rfUsername && appliesToDate(m, selectedDate))
+    .filter(
+      (m) =>
+        normalizeRfUsername(m.rfUsername) === normalizedRfUsername &&
+        appliesToDate(m, selectedDate)
+    )
     .sort((a, b) => (b.effectiveStartDate || "").localeCompare(a.effectiveStartDate || ""));
 
   const chosenMapping = matches[0];
@@ -62,7 +72,8 @@ export function resolveOperatorIdentity({
     defaultTeam:
       employee?.defaultTeam ||
       defaultTeams?.[rfUsername]?.defaultTeam ||
+      defaultTeams?.[normalizedRfUsername]?.defaultTeam ||
       fallbackTeam,
-    mapped: !!employee,
+    mapped: !!chosenMapping,
   };
 }

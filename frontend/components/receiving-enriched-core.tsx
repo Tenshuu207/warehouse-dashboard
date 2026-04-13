@@ -153,6 +153,7 @@ export default function ReceivingEnrichedCore() {
           areaMix,
         };
       })
+      .filter((row) => row.recvPlates > 0 || row.recvPieces > 0)
       .sort((a, b) => b.recvPieces - a.recvPieces);
   }, [data]);
 
