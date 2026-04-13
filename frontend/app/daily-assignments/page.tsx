@@ -483,6 +483,7 @@ export default function DailyAssignmentsPage() {
         date: selectedWeek,
         updatedAt: null,
         sections,
+        placements: [],
       });
       setMoveState(null);
       setSaveState("idle");

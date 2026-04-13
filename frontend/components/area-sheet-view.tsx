@@ -201,8 +201,8 @@ export default function AreaSheetView({ area }: { area: string }) {
     for (const placement of assignments?.placements || []) {
       if (placement?.assignmentKey) {
         map.set(placement.assignmentKey, {
-          role: placement.role,
-          section: placement.section,
+          role: placement.assignedRole ?? undefined,
+          section: placement.assignedSection ?? undefined,
         });
       }
     }

@@ -464,9 +464,16 @@ export default function DailySheetView() {
       }
     }
 
-    if (selectedWeek) {
-      void load();
+    if (!selectedWeek) {
+      setLoading(false);
+      setError("Select a date to load the daily sheet");
+      setData(null);
+      return () => {
+        cancelled = true;
+      };
     }
+
+    void load();
 
     return () => {
       cancelled = true;
@@ -821,13 +828,14 @@ export default function DailySheetView() {
     setPlacementDrafts((prev) => {
       const next: Record<string, DailyOperatorPlacement> = { ...prev };
       const current = next[row.assignmentKey];
+      const { assignmentKey: _ignoredAssignmentKey, ...currentWithoutAssignmentKey } = current || {};
 
       const merged: DailyOperatorPlacement = {
         assignmentKey: row.assignmentKey,
         employeeId: row.employeeId,
         employeeName: row.name,
         rfUsernames: row.rfUsernames,
-        ...current,
+        ...currentWithoutAssignmentKey,
         ...patch,
       };
 

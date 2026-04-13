@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
 import { getRangeData } from "@/lib/data-resolver";
 
 type DashboardData = Awaited<ReturnType<typeof getRangeData>>;
@@ -73,7 +73,7 @@ function StatCard({
   );
 }
 
-export default function RangeSheetPage() {
+function RangeSheetInner() {
   const searchParams = useSearchParams();
 
   const queryStart = normalizeIsoDate(searchParams.get("start"));
@@ -116,11 +116,11 @@ export default function RangeSheetPage() {
   }
 
   useEffect(() => {
-    load(start, end);
+    void load(start, end);
   }, [start, end]);
 
   const operators = data?.operators ?? [];
-  const summary = data?.summary;
+  const summary = data?.weeklySummary;
   const sourceDates = (data as { sourceDates?: string[] } | null)?.sourceDates ?? [];
 
   return (
@@ -246,8 +246,8 @@ export default function RangeSheetPage() {
           <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
             <StatCard label="Total Plates" value={fmt(summary.totalPlates)} />
             <StatCard label="Total Pieces" value={fmt(summary.totalPieces)} />
-            <StatCard label="Repl Plates" value={fmt(summary.totalPlatesNoRecv)} />
-            <StatCard label="Repl Pieces" value={fmt(summary.totalPiecesNoRecv)} />
+            <StatCard label="Repl Plates" value={fmt(summary.replenishmentPlates)} />
+            <StatCard label="Repl Pieces" value={fmt(summary.replenishmentPieces)} />
             <StatCard
               label="Receiving"
               value={fmt(summary.receivingPlates)}
@@ -290,7 +290,7 @@ export default function RangeSheetPage() {
                       <td className="px-3 py-2">{op.assignedRole || "—"}</td>
                       <td className="px-3 py-2">{fmt(op.totalPlates)}</td>
                       <td className="px-3 py-2">{fmt(op.totalPieces)}</td>
-                      <td className="px-3 py-2">{fmt(op.totalPlatesNoRecv)}</td>
+                      <td className="px-3 py-2">{fmt(op.replenishmentPlates)}</td>
                       <td className="px-3 py-2">{fmt(op.receivingPlates)}</td>
                       <td className="px-3 py-2">{fmt(op.actualMinutes)}</td>
                       <td className="px-3 py-2">{fmt(op.standardMinutes)}</td>
@@ -313,5 +313,21 @@ export default function RangeSheetPage() {
         </div>
       )}
     </main>
+  );
+}
+
+export default function RangeSheetPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+            Loading range sheet...
+          </div>
+        </main>
+      }
+    >
+      <RangeSheetInner />
+    </Suspense>
   );
 }

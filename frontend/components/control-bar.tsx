@@ -25,7 +25,9 @@ export default function ControlBar() {
             <input
               type="date"
               value={selectedWeek}
-              onChange={(e) => setSelectedWeek(e.target.value)}
+              onChange={(e) => {
+                if (e.target.value) setSelectedWeek(e.target.value);
+              }}
               className="w-full rounded-xl border px-3 py-2 bg-white"
             />
           </div>

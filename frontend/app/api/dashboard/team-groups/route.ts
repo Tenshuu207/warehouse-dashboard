@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
-import { getSnapshot } from "@/lib/server/db";
+import { resolveNearestSnapshot } from "@/lib/server/db";
 
 type AreaBucket = {
   areaCode?: string | null;
@@ -76,12 +76,40 @@ type TeamAccumulator = {
   operators: TeamOperator[];
 };
 
-function dailyEnrichedPath(date: string) {
-  return path.join(process.cwd(), "..", "ingest", "derived", "daily_enriched", `${date}.json`);
+function dailyEnrichedDir() {
+  return path.join(process.cwd(), "..", "ingest", "derived", "daily_enriched");
 }
 
 function isDateLike(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+async function resolveNearestFile(
+  dirPath: string,
+  requestedKey: string
+): Promise<{ filePath: string; resolvedKey: string } | null> {
+  const entries = await fs.readdir(dirPath);
+  const keys = entries
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => name.replace(/\.json$/, ""))
+    .sort();
+
+  if (keys.length === 0) return null;
+
+  if (keys.includes(requestedKey)) {
+    return {
+      filePath: path.join(dirPath, `${requestedKey}.json`),
+      resolvedKey: requestedKey,
+    };
+  }
+
+  const earlier = keys.filter((key) => key <= requestedKey);
+  const resolvedKey = earlier.length > 0 ? earlier[earlier.length - 1] : keys[0];
+
+  return {
+    filePath: path.join(dirPath, `${resolvedKey}.json`),
+    resolvedKey,
+  };
 }
 
 function inferTeamFromRole(role?: string | null): string | null {
@@ -197,9 +225,33 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "invalid_date" }, { status: 400 });
     }
 
-    const parsed =
-      getSnapshot<Record<string, unknown>>("daily_enriched", date) ||
-      JSON.parse(await fs.readFile(dailyEnrichedPath(date), "utf-8"));
+    let parsed: Record<string, unknown>;
+    let resolvedDate = date;
+    let source: "sqlite" | "json" = "json";
+
+    const resolvedDb = resolveNearestSnapshot<Record<string, unknown>>("daily_enriched", date);
+    if (resolvedDb) {
+      parsed = resolvedDb.payload;
+      resolvedDate = resolvedDb.resolvedKey;
+      source = "sqlite";
+    } else {
+      const resolved = await resolveNearestFile(dailyEnrichedDir(), date);
+      if (!resolved) {
+        return NextResponse.json(
+          {
+            error: "team_groups_not_found",
+            requestedDate: date,
+            details: "No daily_enriched files available",
+          },
+          { status: 404 }
+        );
+      }
+
+      parsed = JSON.parse(await fs.readFile(resolved.filePath, "utf-8")) as Record<string, unknown>;
+      resolvedDate = resolved.resolvedKey;
+      source = "json";
+    }
+
     const operators: OperatorRow[] = Array.isArray(parsed.operators) ? parsed.operators : [];
 
     const teams: Record<string, TeamAccumulator> = {};
@@ -260,12 +312,11 @@ export async function GET(req: NextRequest) {
           normalizeOfficialTeam(op.assignedArea),
         currentRole: op.effectiveAssignedRole || op.assignedRole || null,
         observedRole: tracking.primaryReplenishmentRole || null,
-        observedRoleShare:
-          tracking.primaryReplenishmentRoleShare === null ||
-          tracking.primaryReplenishmentRoleShare === undefined
-            ? null
-            : Number(tracking.primaryReplenishmentRoleShare),
-        observedArea: tracking.primaryReplenishmentAreaCode || tracking.primaryActivityAreaCode || null,
+        observedRoleShare: tracking.primaryReplenishmentRoleShare ?? null,
+        observedArea:
+          tracking.primaryReplenishmentAreaCode ||
+          tracking.primaryActivityAreaCode ||
+          null,
         replenishmentPlates: replPlates,
         replenishmentPieces: replPieces,
         receivingPlates: recvPlates,
@@ -274,28 +325,22 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const teamOrder = ["Receiving", "Dry", "Cooler", "Freezer", "Unassigned"];
+    const payload = {
+      date: resolvedDate,
+      requestedDate: date,
+      resolvedDate,
+      usedFallback: resolvedDate !== date,
+      teams: Object.values(teams)
+        .map((team) => ({
+          ...team,
+          roleGroups: Object.values(team.roleGroups).sort((a, b) => b.replenishmentPlates - a.replenishmentPlates),
+          operators: [...team.operators].sort((a, b) => b.replenishmentPlates - a.replenishmentPlates),
+        }))
+        .sort((a, b) => b.replenishmentPlates - a.replenishmentPlates),
+      source,
+    };
 
-    const teamList = Object.values(teams)
-      .map((team) => ({
-        ...team,
-        roleGroups: Object.values(team.roleGroups).sort((a, b) => {
-          const replDiff = b.replenishmentPlates - a.replenishmentPlates;
-          if (replDiff !== 0) return replDiff;
-          return a.role.localeCompare(b.role);
-        }),
-        operators: team.operators.sort((a, b) => a.name.localeCompare(b.name)),
-      }))
-      .sort((a, b) => {
-        const aIndex = teamOrder.indexOf(a.team);
-        const bIndex = teamOrder.indexOf(b.team);
-        return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
-      });
-
-    return NextResponse.json({
-      date,
-      teams: teamList,
-    });
+    return NextResponse.json(payload);
   } catch (error) {
     return NextResponse.json(
       {

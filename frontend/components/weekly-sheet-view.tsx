@@ -248,7 +248,16 @@ export default function WeeklySheetView() {
       }
     }
 
-    if (selectedWeek) void load();
+    if (!selectedWeek) {
+      setLoading(false);
+      setError("Select a date to load the weekly sheet");
+      setData(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void load();
 
     return () => {
       cancelled = true;
