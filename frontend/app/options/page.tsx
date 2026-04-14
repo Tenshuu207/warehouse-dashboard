@@ -124,6 +124,12 @@ export default function OptionsPage() {
               href="/options/ingestion"
               buttonLabel="Open Ingestion Status"
             />
+            <SettingsCard
+              title="Historical UserLS Import"
+              description="Preview multi-day or full-history RF2 UserLS imports, inspect overlap, and apply Fill Missing or Replace Covered."
+              href="/options/userls-history"
+              buttonLabel="Open Historical Import"
+            />
           </div>
         </section>
 

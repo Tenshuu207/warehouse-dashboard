@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import PageHeader from "@/components/shared/PageHeader";
 import SectionBlock from "@/components/shared/SectionBlock";
@@ -224,6 +225,24 @@ export default function IngestionStatusPage() {
           defaultDate={payload?.end}
           onUploaded={() => loadStatus(windowDays)}
         />
+
+        <section className="rounded-2xl border bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-slate-800">Historical backfill</div>
+              <div className="mt-1 text-xs text-slate-500">
+                Use the historical UserLS importer for multi-day or full-range RF2 UserLS files.
+                Preview overlap first, then apply Fill Missing or Replace Covered.
+              </div>
+            </div>
+            <Link
+              href="/options/userls-history"
+              className="inline-flex rounded-lg border bg-white px-3 py-2 text-sm hover:bg-slate-100"
+            >
+              Open Historical UserLS Import
+            </Link>
+          </div>
+        </section>
 
         {loading ? (
           <section className="rounded-2xl border bg-white p-6 text-sm text-slate-500 shadow-sm">
