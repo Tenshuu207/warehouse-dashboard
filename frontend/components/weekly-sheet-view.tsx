@@ -3,7 +3,11 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/lib/app-state";
-import { getWeekData, type ResolvedDashboardData } from "@/lib/data-resolver";
+import {
+  getOverviewWeekData,
+  getWeekData,
+  type ResolvedDashboardData,
+} from "@/lib/data-resolver";
 import {
   resolveOperatorIdentity,
   type EmployeeRecord,
@@ -205,7 +209,11 @@ function TopListBox({
   );
 }
 
-export default function WeeklySheetView() {
+export default function WeeklySheetView({
+  dataSource = "dashboard",
+}: {
+  dataSource?: "dashboard" | "userls-overview";
+}) {
   const { selectedWeek } = useAppState();
   const [data, setData] = useState<ResolvedDashboardData | null>(null);
   const [defaults, setDefaults] = useState<Record<string, OperatorDefault>>({});
@@ -213,6 +221,7 @@ export default function WeeklySheetView() {
   const [mappings, setMappings] = useState<RfMapping[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const selectedWeekError = selectedWeek ? null : "Select a date to load the weekly sheet";
 
   useEffect(() => {
     let cancelled = false;
@@ -222,8 +231,11 @@ export default function WeeklySheetView() {
         setLoading(true);
         setError(null);
 
+        const loadDashboard =
+          dataSource === "userls-overview" ? getOverviewWeekData : getWeekData;
+
         const [next, defaultsRes, employeesRes, mappingsRes] = await Promise.all([
-          getWeekData(selectedWeek),
+          loadDashboard(selectedWeek),
           fetch("/api/operator-defaults", { cache: "no-store" }),
           fetch("/api/employees", { cache: "no-store" }),
           fetch("/api/rf-mappings", { cache: "no-store" }),
@@ -248,21 +260,14 @@ export default function WeeklySheetView() {
       }
     }
 
-    if (!selectedWeek) {
-      setLoading(false);
-      setError("Select a date to load the weekly sheet");
-      setData(null);
-      return () => {
-        cancelled = true;
-      };
-    }
+    if (!selectedWeek) return;
 
     void load();
 
     return () => {
       cancelled = true;
     };
-  }, [selectedWeek]);
+  }, [selectedWeek, dataSource]);
 
   const rows = useMemo<Row[]>(() => {
     const ops = (data?.operators ?? []) as Array<Record<string, unknown>>;
@@ -459,13 +464,17 @@ export default function WeeklySheetView() {
           const putawayPlates = safeNum(bucket.putawayPlates);
           const putawayPieces = safeNum(bucket.putawayPieces);
           const restockPlates =
-            safeNum(bucket.restockPlates) ||
-            safeNum(bucket.restockPlatesRaw) ||
-            safeNum(bucket.restockLikePlatesEstimated);
+            dataSource === "userls-overview"
+              ? safeNum(bucket.restockLikePlatesEstimated) || safeNum(bucket.restockPlatesRaw)
+              : safeNum(bucket.restockPlates) ||
+                safeNum(bucket.restockPlatesRaw) ||
+                safeNum(bucket.restockLikePlatesEstimated);
           const restockPieces =
-            safeNum(bucket.restockPieces) ||
-            safeNum(bucket.restockPiecesRaw) ||
-            safeNum(bucket.restockLikePiecesEstimated);
+            dataSource === "userls-overview"
+              ? safeNum(bucket.restockLikePiecesEstimated) || safeNum(bucket.restockPiecesRaw)
+              : safeNum(bucket.restockPieces) ||
+                safeNum(bucket.restockPiecesRaw) ||
+                safeNum(bucket.restockLikePiecesEstimated);
 
           target.letdownPlates += letdownPlates;
           target.letdownPieces += letdownPieces;
@@ -493,9 +502,13 @@ export default function WeeklySheetView() {
       const putawayPlates = safeNum(op.putawayPlates);
       const putawayPieces = safeNum(op.putawayPieces);
       const restockPlates =
-        safeNum(op.restockPlates) || safeNum(op.restockLikePlatesEstimated);
+        dataSource === "userls-overview"
+          ? safeNum(op.restockLikePlatesEstimated) || safeNum(op.restockPlates)
+          : safeNum(op.restockPlates) || safeNum(op.restockLikePlatesEstimated);
       const restockPieces =
-        safeNum(op.restockPieces) || safeNum(op.restockLikePiecesEstimated);
+        dataSource === "userls-overview"
+          ? safeNum(op.restockLikePiecesEstimated) || safeNum(op.restockPieces)
+          : safeNum(op.restockPieces) || safeNum(op.restockLikePiecesEstimated);
 
       target.letdownPlates += letdownPlates;
       target.letdownPieces += letdownPieces;
@@ -514,7 +527,7 @@ export default function WeeklySheetView() {
         if (pieceDiff !== 0) return pieceDiff;
         return a.area.localeCompare(b.area);
       });
-  }, [data]);
+  }, [data, dataSource]);
 
   const topReceiving = useMemo(
     () =>
@@ -572,6 +585,14 @@ export default function WeeklySheetView() {
         })),
     [rows]
   );
+
+  if (selectedWeekError) {
+    return (
+      <div className="border-2 border-slate-900 bg-white p-4 text-sm text-red-600">
+        {selectedWeekError}
+      </div>
+    );
+  }
 
   if (loading) {
     return (
