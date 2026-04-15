@@ -48,3 +48,11 @@ warehouse_db_phase1_patch.sh
 # local backups / scratch
 *.bak.*
 audit_env/
+
+# Local Codex state
+.codex/
+
+# Local import inbox and generated historical UserLS artifacts
+ingest/inbox/
+ingest/parsed/rf2_userls_20*.json
+ingest/derived/userls_daily/20*.json
