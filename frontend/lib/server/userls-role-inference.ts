@@ -1,6 +1,7 @@
 export const USERLS_ROLE_CONFIDENCE_THRESHOLD = 0.7;
 
 export type UserlsObservedArea =
+  | "Freezer"
   | "Dry PIR"
   | "Freezer PIR"
   | "FrzMix"
@@ -9,6 +10,7 @@ export type UserlsObservedArea =
   | "ClrDairy"
   | "ClrMeat"
   | "Produce"
+  | "Receiving"
   | "Mixed"
   | "Extra";
 
@@ -92,6 +94,8 @@ type UserAccumulator = {
   name: string | null;
   roleCounts: Map<UserlsObservedRole, WorkloadCounter>;
   areaCounts: Map<UserlsObservedArea, WorkloadCounter>;
+  familyCounts: Map<UserlsObservedArea, WorkloadCounter>;
+  familyRoleCounts: Map<UserlsObservedArea, Map<UserlsObservedRole, WorkloadCounter>>;
   receivedPlates: number;
   inferredReceivingPlates: number;
 };
@@ -178,6 +182,21 @@ export function inferAreaFromBin(bin: string | null | undefined): UserlsObserved
   return "Extra";
 }
 
+function inferFamilyFromTransaction(
+  tx: UserlsTransactionLike,
+  receivingArea: UserlsObservedArea | null
+): UserlsObservedArea {
+  const type = asString(tx.transType);
+  const area = leadingArea(tx.bin);
+  const zone = normalizeZone(tx.bin);
+
+  if (type === "Receive") return "Receiving";
+  if (zone && FRZ_MIX_ZONES.has(zone)) return "FrzMix";
+  if (area === "6") return "Freezer";
+
+  return receivingArea || inferAreaFromBin(tx.bin);
+}
+
 function inferRoleFromTransaction(
   tx: UserlsTransactionLike,
   receivingArea: UserlsObservedArea | null
@@ -206,6 +225,30 @@ function inferRoleFromTransaction(
   return "Extra";
 }
 
+function inferFamilyRoleFromTransaction(
+  tx: UserlsTransactionLike,
+  family: UserlsObservedArea
+): UserlsObservedRole | null {
+  const type = asString(tx.transType);
+
+  if (family === "Receiving") return "Receiving";
+  if (family === "FrzMix") return "FrzMix";
+  if (family === "Freezer") {
+    if (type === "Putaway") return "FrzPut";
+    if (type === "Letdown") return "FrzLet";
+    return null;
+  }
+  if (family === "DryMix") return "DryMix";
+  if (family === "DryFlr") return "DryFlr";
+  if (family === "Dry PIR") return "Dry PIR";
+  if (family === "Freezer PIR") return "Freezer PIR";
+  if (family === "ClrDairy") return "ClrDairy";
+  if (family === "ClrMeat") return "ClrMeat";
+  if (family === "Produce") return "Produce";
+
+  return "Extra";
+}
+
 function addWorkload<T extends string>(
   map: Map<T, WorkloadCounter>,
   label: T,
@@ -216,6 +259,22 @@ function addWorkload<T extends string>(
   current.plates += plates;
   current.pieces += pieces;
   map.set(label, current);
+}
+
+function addFamilyRoleWorkload(
+  map: Map<UserlsObservedArea, Map<UserlsObservedRole, WorkloadCounter>>,
+  family: UserlsObservedArea,
+  role: UserlsObservedRole,
+  plates: number,
+  pieces: number
+) {
+  let roleMap = map.get(family);
+  if (!roleMap) {
+    roleMap = new Map();
+    map.set(family, roleMap);
+  }
+
+  addWorkload(roleMap, role, plates, pieces);
 }
 
 function buildBreakdown<T extends string>(map: Map<T, WorkloadCounter>): WorkloadBreakdownRow[] {
@@ -256,6 +315,37 @@ function chooseObservedLabel<T extends string>(
     confidence: top.plateShare,
     mixed: true,
   };
+}
+
+function chooseFamilyLabel(
+  breakdown: WorkloadBreakdownRow[]
+): { label: UserlsObservedArea; confidence: number | null; mixed: boolean } {
+  if (!breakdown.length) {
+    return { label: "Extra", confidence: null, mixed: false };
+  }
+
+  const top = breakdown[0];
+  if (top.label === "Extra" && top.plateShare >= USERLS_ROLE_CONFIDENCE_THRESHOLD) {
+    return { label: "Extra", confidence: top.plateShare, mixed: false };
+  }
+
+  const knownRows = breakdown.filter((row) => row.label !== "Extra");
+  const knownPlates = knownRows.reduce((sum, row) => sum + row.plates, 0);
+  if (!knownRows.length || knownPlates <= 0) {
+    return { label: "Extra", confidence: top.plateShare, mixed: false };
+  }
+
+  const knownTop = knownRows[0];
+  const knownShare = Number((knownTop.plates / knownPlates).toFixed(4));
+  if (knownShare >= USERLS_ROLE_CONFIDENCE_THRESHOLD) {
+    return {
+      label: knownTop.label as UserlsObservedArea,
+      confidence: knownShare,
+      mixed: false,
+    };
+  }
+
+  return { label: "Mixed", confidence: knownShare, mixed: true };
 }
 
 function collectPutawayCandidates(
@@ -334,6 +424,8 @@ function getAccumulator(
     name,
     roleCounts: new Map(),
     areaCounts: new Map(),
+    familyCounts: new Map(),
+    familyRoleCounts: new Map(),
     receivedPlates: 0,
     inferredReceivingPlates: 0,
   };
@@ -374,9 +466,15 @@ export function buildUserlsObservedAssignments(
           }
         }
 
+        const family = inferFamilyFromTransaction(tx, receivingArea);
         const role = inferRoleFromTransaction(tx, receivingArea);
+        const familyRole = inferFamilyRoleFromTransaction(tx, family);
         addWorkload(acc.areaCounts, area, plates, pieces);
         addWorkload(acc.roleCounts, role, plates, pieces);
+        addWorkload(acc.familyCounts, family, plates, pieces);
+        if (familyRole) {
+          addFamilyRoleWorkload(acc.familyRoleCounts, family, familyRole, plates, pieces);
+        }
       }
     }
   }
@@ -385,16 +483,16 @@ export function buildUserlsObservedAssignments(
   for (const acc of users.values()) {
     const areaBreakdown = buildBreakdown(acc.areaCounts);
     const roleBreakdown = buildBreakdown(acc.roleCounts);
-    const areaChoice = chooseObservedLabel<UserlsObservedArea>(
-      areaBreakdown,
-      "Mixed",
-      "Extra"
-    );
-    const roleChoice = chooseObservedLabel<UserlsObservedRole>(
-      roleBreakdown,
-      "Mixed",
-      "Extra"
-    );
+    const familyBreakdown = buildBreakdown(acc.familyCounts);
+    const familyChoice = chooseFamilyLabel(familyBreakdown);
+    const familyRoleBreakdown =
+      familyChoice.label !== "Mixed"
+        ? buildBreakdown(acc.familyRoleCounts.get(familyChoice.label) || new Map())
+        : [];
+    const roleChoice =
+      familyChoice.label === "Mixed"
+        ? { label: "Mixed" as UserlsObservedRole, confidence: familyChoice.confidence, mixed: true }
+        : chooseObservedLabel<UserlsObservedRole>(familyRoleBreakdown, "Mixed", "Extra");
     const inferredShare = acc.receivedPlates
       ? Number((acc.inferredReceivingPlates / acc.receivedPlates).toFixed(4))
       : null;
@@ -402,15 +500,15 @@ export function buildUserlsObservedAssignments(
     out.set(acc.userid, {
       userid: acc.userid,
       name: acc.name,
-      observedArea: areaChoice.label,
-      observedAreaConfidence: areaChoice.confidence,
+      observedArea: familyChoice.label,
+      observedAreaConfidence: familyChoice.confidence,
       observedRole: roleChoice.label,
       observedRoleConfidence: roleChoice.confidence,
-      mixedWorkFlag: areaChoice.mixed || roleChoice.mixed,
+      mixedWorkFlag: familyChoice.mixed || roleChoice.mixed,
       roleInferenceSource: "userls_transactions",
       roleInferenceThreshold: USERLS_ROLE_CONFIDENCE_THRESHOLD,
-      roleBreakdown,
-      areaBreakdown,
+      roleBreakdown: familyRoleBreakdown.length ? familyRoleBreakdown : roleBreakdown,
+      areaBreakdown: familyBreakdown.length ? familyBreakdown : areaBreakdown,
       receivingInference: {
         receivedPlates: acc.receivedPlates,
         inferredPlates: acc.inferredReceivingPlates,
