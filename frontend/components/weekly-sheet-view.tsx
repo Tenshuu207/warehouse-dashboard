@@ -303,20 +303,41 @@ export default function WeeklySheetView({
 
       const employeeId = resolved.employeeId || null;
       const rowKey = mergeKeyForEmployee(employeeId, name || fallbackName, userid);
+      const tracking =
+        op.userlsTracking && typeof op.userlsTracking === "object"
+          ? (op.userlsTracking as Record<string, unknown>)
+          : null;
 
       const role = String(
-        op.effectiveAssignedRole ||
-          op.currentRole ||
-          op.rawAssignedRole ||
-          "—"
+        dataSource === "userls-overview"
+          ? op.observedRole ||
+              tracking?.observedRole ||
+              op.primaryReplenishmentRole ||
+              tracking?.primaryReplenishmentRole ||
+              op.effectiveAssignedRole ||
+              op.currentRole ||
+              op.rawAssignedRole ||
+              "—"
+          : op.effectiveAssignedRole ||
+              op.currentRole ||
+              op.rawAssignedRole ||
+              "—"
       );
 
       const area = String(
-        op.effectivePerformanceArea ||
-          op.rawDominantArea ||
-          op.effectiveAssignedArea ||
-          op.area ||
-          "Other"
+        dataSource === "userls-overview"
+          ? op.observedArea ||
+              tracking?.observedArea ||
+              op.effectivePerformanceArea ||
+              op.rawDominantArea ||
+              op.effectiveAssignedArea ||
+              op.area ||
+              "Other"
+          : op.effectivePerformanceArea ||
+              op.rawDominantArea ||
+              op.effectiveAssignedArea ||
+              op.area ||
+              "Other"
       );
 
       const letdownPlates = safeNum(op.letdownPlates);
@@ -394,7 +415,7 @@ export default function WeeklySheetView({
       }))
       .filter((row) => row.totalPlates > 0 || row.receivingPlates > 0)
       .sort((a, b) => b.totalPieces - a.totalPieces);
-  }, [data, selectedWeek, employees, mappings, defaults]);
+  }, [data, selectedWeek, employees, mappings, defaults, dataSource]);
 
   const totals = useMemo(() => {
     return rows.reduce(
