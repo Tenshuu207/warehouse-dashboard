@@ -1,48 +1,65 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/lib/app-state";
-import PageHeader from "./shared/PageHeader";
-import StatCard from "./shared/StatCard";
 
-type TeamGroupsResponse = {
-  date: string;
-  teams: Array<{
-    team: string;
-    operatorCount: number;
-    replenishmentPlates: number;
-    replenishmentPieces: number;
-    receivingPlates: number;
-    receivingPieces: number;
-    roleGroups: Array<{
-      role: string;
-      operatorCount: number;
-      replenishmentPlates: number;
-      replenishmentPieces: number;
-      receivingPlates: number;
-      receivingPieces: number;
-    }>;
-    operators: Array<{
-      userid: string;
-      name: string;
-      roleGroup: string;
-      officialTeam: string | null;
-      currentRole: string | null;
-      observedRole: string | null;
-      observedRoleShare: number | null;
-      observedArea: string | null;
-      replenishmentPlates: number;
-      replenishmentPieces: number;
-      receivingPlates: number;
-      receivingPieces: number;
-      receivingMix: string | null;
-    }>;
-  }>;
+type Workload = {
+  plates: number;
+  pieces: number;
 };
 
-function fmt(value: number | null | undefined) {
-  return Number(value || 0).toLocaleString();
+type AreaDistributionRow = Workload & {
+  area: string;
+  receivingPlates: number;
+  receivingPieces: number;
+  replenishmentPlates: number;
+  replenishmentPieces: number;
+  plateShare: number;
+  pieceShare: number | null;
+};
+
+type OverviewSummaryResponse = {
+  weekStart: string;
+  weekEnd: string;
+  resolvedWeekStart: string;
+  resolvedWeekEnd: string;
+  sourceDates: string[];
+  totalWorkload: Workload & {
+    operatorCount: number;
+    avgPiecesPerPlate: number;
+  };
+  receivingShare: Workload & {
+    plateShare: number;
+    pieceShare: number | null;
+  };
+  replenishmentShare: Workload & {
+    plateShare: number;
+    pieceShare: number | null;
+  };
+  areaDistribution: AreaDistributionRow[];
+  trendVsPreviousWeek: {
+    previousWeekStart: string;
+    previousWeekEnd: string;
+    previousPlates: number | null;
+    previousPieces: number | null;
+    plateDelta: number | null;
+    pieceDelta: number | null;
+    plateDeltaPct: number | null;
+    pieceDeltaPct: number | null;
+    direction: "up" | "down" | "flat" | "unavailable";
+  };
+  supportingDetail: {
+    topAreas: AreaDistributionRow[];
+    includedOperatorCount: number;
+    note: string;
+  };
+};
+
+function fmt(value: number | null | undefined, digits = 0) {
+  return Number(value || 0).toLocaleString("en-US", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
 }
 
 function pct(value: number | null | undefined) {
@@ -50,9 +67,55 @@ function pct(value: number | null | undefined) {
   return `${(Number(value) * 100).toFixed(1)}%`;
 }
 
+function signedFmt(value: number | null | undefined) {
+  if (value === null || value === undefined) return "—";
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${fmt(value)}`;
+}
+
+function trendLabel(direction: OverviewSummaryResponse["trendVsPreviousWeek"]["direction"]) {
+  if (direction === "up") return "Heavier";
+  if (direction === "down") return "Lighter";
+  if (direction === "flat") return "Flat";
+  return "No prior week";
+}
+
+function MetricBlock({
+  title,
+  value,
+  label,
+  children,
+  className = "",
+}: {
+  title: string;
+  value: string;
+  label: string;
+  children?: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={`rounded-lg border border-slate-200 bg-white p-4 shadow-sm ${className}`}>
+      <div className="text-xs font-semibold uppercase tracking-normal text-slate-500">{title}</div>
+      <div className="mt-2 text-3xl font-bold text-slate-950">{value}</div>
+      <div className="mt-1 text-sm text-slate-600">{label}</div>
+      {children ? <div className="mt-4">{children}</div> : null}
+    </section>
+  );
+}
+
+function ShareBar({ value, className = "bg-blue-700" }: { value: number; className?: string }) {
+  const width = Math.max(0, Math.min(100, value * 100));
+
+  return (
+    <div className="h-2 rounded bg-slate-100">
+      <div className={`h-2 rounded ${className}`} style={{ width: `${width}%` }} />
+    </div>
+  );
+}
+
 export default function OverviewEnrichedCore() {
   const { selectedWeek } = useAppState();
-  const [data, setData] = useState<TeamGroupsResponse | null>(null);
+  const [data, setData] = useState<OverviewSummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,13 +127,13 @@ export default function OverviewEnrichedCore() {
         setLoading(true);
         setError(null);
 
-        const res = await fetch(`/api/dashboard/team-groups?date=${selectedWeek}&source=userls`, {
+        const res = await fetch(`/api/dashboard/overview-summary?weekStart=${selectedWeek}`, {
           cache: "no-store",
         });
-        const json = (await res.json()) as TeamGroupsResponse & { details?: string };
+        const json = (await res.json()) as OverviewSummaryResponse & { details?: string };
 
         if (!res.ok) {
-          throw new Error(json.details || "Failed to load overview enriched data");
+          throw new Error(json.details || "Failed to load overview summary");
         }
 
         if (!cancelled) {
@@ -79,7 +142,7 @@ export default function OverviewEnrichedCore() {
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load overview enriched data");
+          setError(err instanceof Error ? err.message : "Failed to load overview summary");
           setLoading(false);
         }
       }
@@ -92,247 +155,122 @@ export default function OverviewEnrichedCore() {
     };
   }, [selectedWeek]);
 
-  const summary = useMemo(() => {
-    const teams = data?.teams || [];
-
-    return teams.reduce(
-      (acc, team) => {
-        acc.teams += 1;
-        acc.operators += team.operatorCount;
-        acc.replPlates += team.replenishmentPlates;
-        acc.replPieces += team.replenishmentPieces;
-        acc.recvPlates += team.receivingPlates;
-        acc.recvPieces += team.receivingPieces;
-        return acc;
-      },
-      {
-        teams: 0,
-        operators: 0,
-        replPlates: 0,
-        replPieces: 0,
-        recvPlates: 0,
-        recvPieces: 0,
-      }
-    );
-  }, [data]);
-
-  const flattenedRoles = useMemo(() => {
-    const totals = new Map<
-      string,
-      {
-        role: string;
-        operatorCount: number;
-        replenishmentPlates: number;
-        replenishmentPieces: number;
-        receivingPlates: number;
-        receivingPieces: number;
-      }
-    >();
-
-    for (const team of data?.teams || []) {
-      for (const group of team.roleGroups || []) {
-        const current = totals.get(group.role) || {
-          role: group.role,
-          operatorCount: 0,
-          replenishmentPlates: 0,
-          replenishmentPieces: 0,
-          receivingPlates: 0,
-          receivingPieces: 0,
-        };
-
-        current.operatorCount += Number(group.operatorCount || 0);
-        current.replenishmentPlates += Number(group.replenishmentPlates || 0);
-        current.replenishmentPieces += Number(group.replenishmentPieces || 0);
-        current.receivingPlates += Number(group.receivingPlates || 0);
-        current.receivingPieces += Number(group.receivingPieces || 0);
-
-        totals.set(group.role, current);
-      }
-    }
-
-    return [...totals.values()].sort((a, b) => {
-      const replDiff = b.replenishmentPlates - a.replenishmentPlates;
-      if (replDiff !== 0) return replDiff;
-      return a.role.localeCompare(b.role);
-    });
-  }, [data]);
-
-  const topOperators = useMemo(() => {
-    const rows =
-      data?.teams.flatMap((team) =>
-        (team.operators || []).map((op) => ({
-          ...op,
-          team: team.team,
-        }))
-      ) || [];
-
-    return rows
-      .filter(
-        (op) =>
-          Number(op.replenishmentPlates || 0) > 0 ||
-          Number(op.replenishmentPieces || 0) > 0
-      )
-      .sort((a, b) => {
-        const replDiff = Number(b.replenishmentPlates || 0) - Number(a.replenishmentPlates || 0);
-        if (replDiff !== 0) return replDiff;
-        const recvDiff = Number(b.receivingPieces || 0) - Number(a.receivingPieces || 0);
-        if (recvDiff !== 0) return recvDiff;
-        return a.name.localeCompare(b.name);
-      })
-      .slice(0, 15);
-  }, [data]);
+  const topAreas = useMemo(() => data?.areaDistribution.slice(0, 5) || [], [data]);
+  const otherAreas = Math.max(0, (data?.areaDistribution.length || 0) - topAreas.length);
 
   if (loading) {
     return (
-      <section className="rounded-2xl bg-white border shadow-sm p-4">
-        <h3 className="text-lg font-bold">Overview Core (Enriched)</h3>
-        <p className="mt-1 text-sm text-slate-500">Loading enriched overview data…</p>
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 className="text-lg font-bold">Overview</h3>
+        <p className="mt-1 text-sm text-slate-500">Loading command summary...</p>
       </section>
     );
   }
 
   if (error) {
     return (
-      <section className="rounded-2xl bg-white border shadow-sm p-4">
-        <h3 className="text-lg font-bold">Overview Core (Enriched)</h3>
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 className="text-lg font-bold">Overview</h3>
         <p className="mt-1 text-sm text-red-600">{error}</p>
       </section>
     );
   }
 
+  if (!data) return null;
+
+  const trend = data.trendVsPreviousWeek;
+  const trendDetail =
+    trend.previousPlates === null
+      ? `Previous week ${trend.previousWeekStart} to ${trend.previousWeekEnd} is not loaded.`
+      : `${signedFmt(trend.plateDelta)} plates, ${signedFmt(trend.pieceDelta)} pieces vs ${trend.previousWeekStart} to ${trend.previousWeekEnd}.`;
+
   return (
-    <section className="rounded-2xl bg-white border shadow-sm p-4 space-y-4">
-      <PageHeader
-        title="Overview Core (Enriched)"
-        subtitle="Main weekly snapshot from enriched team grouping, observed replenishment roles, and receiving destination context."
-      />
-
-      <div className="grid grid-cols-2 xl:grid-cols-6 gap-3">
-        <StatCard label="Teams">{summary.teams}</StatCard>
-        <StatCard label="Operators">{summary.operators}</StatCard>
-        <StatCard label="Repl Plates">{fmt(summary.replPlates)}</StatCard>
-        <StatCard label="Repl Pieces">{fmt(summary.replPieces)}</StatCard>
-        <StatCard label="Receiving Plates">{fmt(summary.recvPlates)}</StatCard>
-        <StatCard label="Receiving Pieces">{fmt(summary.recvPieces)}</StatCard>
+    <section className="space-y-4">
+      <div className="text-xs font-medium text-slate-500">
+        UserLS summary for {data.resolvedWeekStart} to {data.resolvedWeekEnd}
       </div>
 
-      <div>
-        <h4 className="text-sm font-semibold text-slate-800">Team Snapshot</h4>
-        <div className="mt-2 overflow-x-auto">
-          <table className="w-full min-w-[1000px] text-sm">
-            <thead className="bg-slate-50 border-b">
-              <tr className="text-left">
-                <th className="px-3 py-2 font-semibold">Team</th>
-                <th className="px-3 py-2 font-semibold">Operators</th>
-                <th className="px-3 py-2 font-semibold">Repl Plates</th>
-                <th className="px-3 py-2 font-semibold">Repl Pieces</th>
-                <th className="px-3 py-2 font-semibold">Recv Plates</th>
-                <th className="px-3 py-2 font-semibold">Recv Pieces</th>
-                <th className="px-3 py-2 font-semibold">Primary Groups</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(data?.teams || []).map((team) => (
-                <tr key={team.team} className="border-b last:border-b-0">
-                  <td className="px-3 py-2 font-medium">{team.team}</td>
-                  <td className="px-3 py-2">{fmt(team.operatorCount)}</td>
-                  <td className="px-3 py-2">{fmt(team.replenishmentPlates)}</td>
-                  <td className="px-3 py-2">{fmt(team.replenishmentPieces)}</td>
-                  <td className="px-3 py-2">{fmt(team.receivingPlates)}</td>
-                  <td className="px-3 py-2">{fmt(team.receivingPieces)}</td>
-                  <td className="px-3 py-2 text-slate-600">
-                    {(team.roleGroups || [])
-                      .slice(0, 3)
-                      .map((group) => `${group.role} (${fmt(group.replenishmentPlates)})`)
-                      .join(", ") || "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+        <MetricBlock
+          title="Total Plates"
+          value={fmt(data.totalWorkload.plates)}
+          label={`Included Operators: ${fmt(data.supportingDetail.includedOperatorCount)}`}
+        >
+          <div className="text-sm text-slate-600">
+            {fmt(data.sourceDates.length)} day{data.sourceDates.length === 1 ? "" : "s"} loaded
+          </div>
+        </MetricBlock>
+
+        <MetricBlock
+          title="Total Pieces"
+          value={fmt(data.totalWorkload.pieces)}
+          label={`${fmt(data.totalWorkload.avgPiecesPerPlate, 2)} pieces / plate`}
+        >
+          <div className="text-sm text-slate-600">
+            Same included operator set as total plates
+          </div>
+        </MetricBlock>
+
+        <MetricBlock
+          title="Receiving Share"
+          value={pct(data.receivingShare.plateShare)}
+          label={`${fmt(data.receivingShare.plates)} plates, ${fmt(data.receivingShare.pieces)} pieces`}
+        >
+          <ShareBar value={data.receivingShare.plateShare} className="bg-emerald-700" />
+        </MetricBlock>
+
+        <MetricBlock
+          title="Replenishment Share"
+          value={pct(data.replenishmentShare.plateShare)}
+          label={`${fmt(data.replenishmentShare.plates)} plates, ${fmt(data.replenishmentShare.pieces)} pieces`}
+        >
+          <ShareBar value={data.replenishmentShare.plateShare} className="bg-blue-700" />
+        </MetricBlock>
+
+        <MetricBlock
+          title="Trend"
+          value={trendLabel(trend.direction)}
+          label={trendDetail}
+        >
+          <div className="text-sm font-semibold text-slate-950">
+            {trend.plateDeltaPct === null ? "—" : `${signedFmt(trend.plateDeltaPct * 100)}%`}
+          </div>
+        </MetricBlock>
       </div>
 
-      <div>
-        <h4 className="text-sm font-semibold text-slate-800">Observed Role Snapshot</h4>
-        <div className="mt-2 overflow-x-auto">
-          <table className="w-full min-w-[1000px] text-sm">
-            <thead className="bg-slate-50 border-b">
-              <tr className="text-left">
-                <th className="px-3 py-2 font-semibold">Role</th>
-                <th className="px-3 py-2 font-semibold">Operators</th>
-                <th className="px-3 py-2 font-semibold">Repl Plates</th>
-                <th className="px-3 py-2 font-semibold">Repl Pieces</th>
-                <th className="px-3 py-2 font-semibold">Recv Plates</th>
-                <th className="px-3 py-2 font-semibold">Recv Pieces</th>
-              </tr>
-            </thead>
-            <tbody>
-              {flattenedRoles.slice(0, 12).map((role) => (
-                <tr key={role.role} className="border-b last:border-b-0">
-                  <td className="px-3 py-2 font-medium">{role.role}</td>
-                  <td className="px-3 py-2">{fmt(role.operatorCount)}</td>
-                  <td className="px-3 py-2">{fmt(role.replenishmentPlates)}</td>
-                  <td className="px-3 py-2">{fmt(role.replenishmentPieces)}</td>
-                  <td className="px-3 py-2">{fmt(role.receivingPlates)}</td>
-                  <td className="px-3 py-2">{fmt(role.receivingPieces)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <MetricBlock
+        title="Area Distribution"
+        value={topAreas[0] ? `${topAreas[0].area} leads` : "No area work"}
+        label={
+          topAreas[0]
+            ? `${pct(topAreas[0].plateShare)} of non-pick plates`
+            : "No UserLS non-pick activity found"
+        }
+      >
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
+          {topAreas.map((row) => (
+            <div key={row.area} className="min-w-0">
+              <div className="flex items-center justify-between gap-2 text-sm">
+                <div className="truncate font-semibold text-slate-900">{row.area}</div>
+                <div className="text-slate-600">{pct(row.plateShare)}</div>
+              </div>
+              <ShareBar value={row.plateShare} />
+              <div className="mt-1 text-xs text-slate-500">
+                {fmt(row.plates)} plates · Rcv {fmt(row.receivingPlates)} · Repl{" "}
+                {fmt(row.replenishmentPlates)}
+              </div>
+            </div>
+          ))}
         </div>
-      </div>
+        {otherAreas > 0 ? (
+          <div className="mt-3 text-xs text-slate-500">
+            {fmt(otherAreas)} smaller area{otherAreas === 1 ? "" : "s"} included in totals.
+          </div>
+        ) : null}
+      </MetricBlock>
 
-      <div>
-        <h4 className="text-sm font-semibold text-slate-800">Top Operators by Replenishment</h4>
-        <div className="mt-2 overflow-x-auto">
-          <table className="w-full min-w-[1200px] text-sm">
-            <thead className="bg-slate-50 border-b">
-              <tr className="text-left">
-                <th className="px-3 py-2 font-semibold">Operator</th>
-                <th className="px-3 py-2 font-semibold">Team</th>
-                <th className="px-3 py-2 font-semibold">Observed Role</th>
-                <th className="px-3 py-2 font-semibold">Observed Area</th>
-                <th className="px-3 py-2 font-semibold">Repl Plates</th>
-                <th className="px-3 py-2 font-semibold">Repl Pieces</th>
-                <th className="px-3 py-2 font-semibold">Recv Plates</th>
-                <th className="px-3 py-2 font-semibold">Recv Pieces</th>
-                <th className="px-3 py-2 font-semibold">Receiving Mix</th>
-              </tr>
-            </thead>
-            <tbody>
-              {topOperators.map((op) => (
-                <tr key={op.userid} className="border-b last:border-b-0">
-                  <td className="px-3 py-2">
-                    <Link href={`/operators/${op.userid}`} className="font-medium hover:underline">
-                      {op.name}
-                    </Link>
-                    <div className="text-[11px] text-slate-500">{op.userid}</div>
-                  </td>
-                  <td className="px-3 py-2">{op.team}</td>
-                  <td className="px-3 py-2">
-                    {op.observedRole ? (
-                      <div>
-                        <div>{op.observedRole}</div>
-                        <div className="text-[11px] text-slate-500">
-                          {pct(op.observedRoleShare)}
-                        </div>
-                      </div>
-                    ) : (
-                      <span className="text-slate-400">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2">{op.observedArea || "—"}</td>
-                  <td className="px-3 py-2">{fmt(op.replenishmentPlates)}</td>
-                  <td className="px-3 py-2">{fmt(op.replenishmentPieces)}</td>
-                  <td className="px-3 py-2">{fmt(op.receivingPlates)}</td>
-                  <td className="px-3 py-2">{fmt(op.receivingPieces)}</td>
-                  <td className="px-3 py-2 text-slate-600">{op.receivingMix || "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
+        {data.supportingDetail.note}
       </div>
     </section>
   );

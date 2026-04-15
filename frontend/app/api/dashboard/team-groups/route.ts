@@ -18,6 +18,11 @@ type UserlsTracking = {
   receivingPieces?: number;
   replenishmentNoRecvPlates?: number;
   replenishmentNoRecvPieces?: number;
+  observedArea?: string | null;
+  observedAreaConfidence?: number | null;
+  observedRole?: string | null;
+  observedRoleConfidence?: number | null;
+  mixedWorkFlag?: boolean;
   primaryReplenishmentAreaCode?: string | null;
   primaryReplenishmentShare?: number | null;
   primaryActivityAreaCode?: string | null;
@@ -116,14 +121,21 @@ async function resolveNearestFile(
 function inferTeamFromRole(role?: string | null): string | null {
   if (!role) return null;
   if (role.startsWith("Dry")) return "Dry";
+  if (role === "Dry PIR") return "Dry";
   if (role.startsWith("Clr") || role === "Produce") return "Cooler";
   if (role.startsWith("Frz")) return "Freezer";
+  if (role === "Freezer PIR") return "Freezer";
   if (role === "Receiving") return "Receiving";
+  if (role === "Mixed" || role === "Extra") return role;
   return null;
 }
 
 function inferTeamFromAreaCode(area?: string | null): string | null {
   if (!area) return null;
+  if (area === "Dry PIR" || area === "DryMix" || area === "DryFlr") return "Dry";
+  if (area === "ClrDairy" || area === "ClrMeat" || area === "Produce") return "Cooler";
+  if (area === "Freezer PIR" || area === "FrzMix") return "Freezer";
+  if (area === "Mixed" || area === "Extra") return area;
   if (area === "1" || area === "5") return "Dry";
   if (area === "2" || area === "3" || area === "4") return "Cooler";
   if (area === "6" || area === "7") return "Freezer";
@@ -175,10 +187,13 @@ function chooseTeam(op: OperatorRow): string {
   if (officialTeam) return officialTeam;
 
   const tracking = op.userlsTracking;
-  const observedRoleTeam = inferTeamFromRole(tracking?.primaryReplenishmentRole);
+  const observedRoleTeam = inferTeamFromRole(
+    tracking?.observedRole || tracking?.primaryReplenishmentRole
+  );
   if (observedRoleTeam) return observedRoleTeam;
 
   const observedAreaTeam =
+    inferTeamFromAreaCode(tracking?.observedArea) ||
     inferTeamFromAreaCode(tracking?.primaryReplenishmentAreaCode) ||
     inferTeamFromAreaCode(tracking?.primaryActivityAreaCode);
   if (observedAreaTeam) return observedAreaTeam;
@@ -192,7 +207,7 @@ function chooseTeam(op: OperatorRow): string {
 
 function chooseRoleGroup(op: OperatorRow, team: string): string {
   const tracking = op.userlsTracking;
-  const observedRole = tracking?.primaryReplenishmentRole || null;
+  const observedRole = tracking?.observedRole || tracking?.primaryReplenishmentRole || null;
   const currentRole = op.effectiveAssignedRole || op.assignedRole || null;
 
   if (team === "Receiving") {
@@ -331,9 +346,11 @@ export async function GET(req: NextRequest) {
           normalizeOfficialTeam(op.effectiveAssignedArea) ||
           normalizeOfficialTeam(op.assignedArea),
         currentRole: op.effectiveAssignedRole || op.assignedRole || null,
-        observedRole: tracking.primaryReplenishmentRole || null,
-        observedRoleShare: tracking.primaryReplenishmentRoleShare ?? null,
+        observedRole: tracking.observedRole || tracking.primaryReplenishmentRole || null,
+        observedRoleShare:
+          tracking.observedRoleConfidence ?? tracking.primaryReplenishmentRoleShare ?? null,
         observedArea:
+          tracking.observedArea ||
           tracking.primaryReplenishmentAreaCode ||
           tracking.primaryActivityAreaCode ||
           null,

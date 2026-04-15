@@ -1,6 +1,11 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { getSnapshot } from "@/lib/server/db";
+import {
+  buildUserlsObservedAssignments,
+  type UserlsObservedAssignment,
+  type UserlsParsedPayloadLike,
+} from "@/lib/server/userls-role-inference";
 
 type JsonObj = Record<string, unknown>;
 
@@ -68,6 +73,8 @@ type UserlsDaily = {
   users?: UserlsUser[];
 };
 
+type UserlsParsed = UserlsParsedPayloadLike;
+
 type OperatorAgg = {
   userid: string;
   name: string;
@@ -97,6 +104,12 @@ type OperatorAgg = {
   primaryActivityShare: number | null;
   primaryReplenishmentRole: string | null;
   primaryReplenishmentRoleShare: number | null;
+  observedArea: string | null;
+  observedAreaConfidence: number | null;
+  observedRole: string | null;
+  observedRoleConfidence: number | null;
+  mixedWorkFlag: boolean;
+  roleInference: UserlsObservedAssignment | null;
   sourceDates: Set<string>;
   areaBuckets: Map<string, UserlsAreaBucket>;
   roleBuckets: Map<string, UserlsRoleBucket>;
@@ -104,6 +117,10 @@ type OperatorAgg = {
 
 function userlsDailyDir() {
   return path.join(process.cwd(), "..", "ingest", "derived", "userls_daily");
+}
+
+function parsedDir() {
+  return path.join(process.cwd(), "..", "ingest", "parsed");
 }
 
 function asNumber(value: unknown): number {
@@ -144,6 +161,23 @@ async function readUserlsDaily(date: string): Promise<UserlsDaily | null> {
   const filePath = path.join(userlsDailyDir(), `${date}.json`);
   try {
     return JSON.parse(await fs.readFile(filePath, "utf-8")) as UserlsDaily;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function readUserlsParsed(date: string): Promise<UserlsParsed | null> {
+  try {
+    const snapshot = getSnapshot<UserlsParsed>("rf2_userls_parsed", date);
+    if (snapshot) return snapshot;
+  } catch {
+    // Fall back to the canonical parsed JSON file if sqlite is unavailable.
+  }
+
+  const filePath = path.join(parsedDir(), `rf2_userls_${date}.json`);
+  try {
+    return JSON.parse(await fs.readFile(filePath, "utf-8")) as UserlsParsed;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
@@ -235,6 +269,12 @@ function getOperatorAgg(map: Map<string, OperatorAgg>, userid: string): Operator
     primaryActivityShare: null,
     primaryReplenishmentRole: null,
     primaryReplenishmentRoleShare: null,
+    observedArea: null,
+    observedAreaConfidence: null,
+    observedRole: null,
+    observedRoleConfidence: null,
+    mixedWorkFlag: false,
+    roleInference: null,
     sourceDates: new Set<string>(),
     areaBuckets: new Map(),
     roleBuckets: new Map(),
@@ -247,12 +287,18 @@ function getOperatorAgg(map: Map<string, OperatorAgg>, userid: string): Operator
 export async function buildUserlsOverviewWeek(weekStart: string) {
   const weekEnd = addDaysIso(weekStart, 6);
   const dailyPayloads: Array<{ date: string; payload: UserlsDaily }> = [];
+  const parsedPayloads: Array<{ date: string; payload: UserlsParsed }> = [];
 
   for (let offset = 0; offset < 7; offset += 1) {
     const date = addDaysIso(weekStart, offset);
     const payload = await readUserlsDaily(date);
     if (payload) {
       dailyPayloads.push({ date, payload });
+    }
+
+    const parsed = await readUserlsParsed(date);
+    if (parsed) {
+      parsedPayloads.push({ date, payload: parsed });
     }
   }
 
@@ -269,6 +315,7 @@ export async function buildUserlsOverviewWeek(weekStart: string) {
     avgPiecesPerPlateNoRecv: 0,
   };
   const operatorsByUser = new Map<string, OperatorAgg>();
+  const observedAssignments = buildUserlsObservedAssignments(parsedPayloads);
 
   for (const { date, payload } of dailyPayloads) {
     const users = Array.isArray(payload.users) ? payload.users : [];
@@ -330,14 +377,18 @@ export async function buildUserlsOverviewWeek(weekStart: string) {
   }
 
   const operators = [...operatorsByUser.values()]
+    .filter((agg) => agg.totalPlatesNoRecv > 0 || agg.receivingPlates > 0)
     .map((agg) => {
       const primaryArea = chooseLargestBucket(agg.areaBuckets, "replenishmentNoRecvPlates");
       const primaryActivityArea = chooseLargestBucket(agg.areaBuckets, "nonPickAllPlates");
       const primaryRole = chooseLargestBucket(agg.roleBuckets, "replenishmentNoRecvPlates");
       const areaBuckets = [...agg.areaBuckets.values()];
       const roleBuckets = [...agg.roleBuckets.values()];
+      const observed = observedAssignments.get(agg.userid) || null;
 
       const effectivePerformanceArea = primaryArea.key || primaryActivityArea.key;
+      const observedArea = observed?.observedArea || null;
+      const observedRole = observed?.observedRole || null;
 
       summary.totalPlates += agg.totalPlates;
       summary.totalPieces += agg.totalPieces;
@@ -355,8 +406,14 @@ export async function buildUserlsOverviewWeek(weekStart: string) {
         rawAssignedArea: null,
         effectiveAssignedRole: null,
         effectiveAssignedArea: null,
-        rawDominantArea: effectivePerformanceArea,
-        effectivePerformanceArea,
+        rawDominantArea: observedArea || effectivePerformanceArea,
+        effectivePerformanceArea: observedArea || effectivePerformanceArea,
+        observedArea,
+        observedAreaConfidence: observed?.observedAreaConfidence ?? null,
+        observedRole,
+        observedRoleConfidence: observed?.observedRoleConfidence ?? null,
+        mixedWorkFlag: observed?.mixedWorkFlag ?? false,
+        roleInference: observed,
         letdownPlates: agg.letdownPlates,
         letdownPieces: agg.letdownPieces,
         putawayPlates: agg.putawayPlates,
@@ -407,8 +464,17 @@ export async function buildUserlsOverviewWeek(weekStart: string) {
           primaryReplenishmentShare: primaryArea.share,
           primaryActivityAreaCode: primaryActivityArea.key,
           primaryActivityShare: primaryActivityArea.share,
-          primaryReplenishmentRole: primaryRole.key,
-          primaryReplenishmentRoleShare: primaryRole.share,
+          primaryReplenishmentRole: observedRole || primaryRole.key,
+          primaryReplenishmentRoleShare:
+            observed?.observedRoleConfidence ?? primaryRole.share,
+          observedArea,
+          observedAreaConfidence: observed?.observedAreaConfidence ?? null,
+          observedRole,
+          observedRoleConfidence: observed?.observedRoleConfidence ?? null,
+          mixedWorkFlag: observed?.mixedWorkFlag ?? false,
+          roleBreakdown: observed?.roleBreakdown || [],
+          areaBreakdown: observed?.areaBreakdown || [],
+          receivingInference: observed?.receivingInference || null,
           areaBuckets,
           roleBuckets,
         },
