@@ -76,7 +76,11 @@ export default function HomePage() {
           </div>
         </section>
 
-        {mode === "sheet" ? <WeeklySheetView /> : <OverviewEnrichedCore />}
+        {mode === "sheet" ? (
+          <WeeklySheetView dataSource="userls-overview" />
+        ) : (
+          <OverviewEnrichedCore />
+        )}
       </div>
     </main>
   );

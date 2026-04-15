@@ -89,8 +89,9 @@ CREATE TABLE IF NOT EXISTS dataset_components (
 def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
     path = Path(db_path or DEFAULT_DB_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 30000")
     conn.executescript(SCHEMA_SQL)
     return conn
 

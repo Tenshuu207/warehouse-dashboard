@@ -388,6 +388,18 @@ export async function getWeekData(selectedDate: string): Promise<ResolvedDashboa
   return normalizeRaw(raw);
 }
 
+export async function getOverviewWeekData(selectedDate: string): Promise<ResolvedDashboardData> {
+  const res = await fetch(`/api/dashboard/overview-weekly?weekStart=${selectedDate}`, {
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to load UserLS overview data for ${selectedDate}`);
+  }
+
+  return (await res.json()) as ResolvedDashboardData;
+}
+
 export async function getRangeData(
   startDate: string,
   endDate: string
@@ -403,4 +415,3 @@ export async function getRangeData(
   const raw = asObj(await res.json());
   return normalizeRaw(raw);
 }
-

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import sys
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,7 @@ TX_RE = re.compile(
     (?P<pallet_date>\d{2}/\d{2}/\d{2})\s+
     (?P<transtype>[A-Za-z][A-Za-z0-9]+)\s+
     (?P<bin>\S+)\s+
-    (?P<qty>-?\d+)\s+
+    (?P<qty>-?\d+-?)\s+
     (?P<unit>\S+)
     \s*$
     """,
@@ -36,11 +37,11 @@ USER_HEADER_RE = re.compile(
 )
 
 TOTAL_HEADER_RE = re.compile(
-    r"^(?P<userid>[A-Za-z0-9_]+)\s+(?P<name>.+?)\s+\(Total\)\s+Inactive Mins:\s+(?P<inactive>\d+)(?P<rest>.*)$"
+    r"^(?P<userid>[A-Za-z0-9_]+)\s+(?P<name>.+?)\s+\(Total\)\s+Inactive Mins:\s+(?P<inactive>-?\d+-?)(?P<rest>.*)$"
 )
 
 TOTAL_PIECES_RE = re.compile(
-    r"(?:Route:\s*(?P<route>\d+)\s+)?Total Pieces\s+(?P<transtype>[A-Za-z0-9]+):\s*(?P<pieces>-?\d+)"
+    r"(?:Route:\s*(?P<route>\d+)\s+)?Total Pieces\s+(?P<transtype>[A-Za-z0-9]+):\s*(?P<pieces>-?\d+-?)"
 )
 
 TIMES_RE = re.compile(
@@ -54,6 +55,13 @@ NO_ACTIVITY_RE = re.compile(
 MIDDLE_SPLIT_RE = re.compile(
     r"^(?P<description>.+?)(?:\s{2,}(?P<customer_id>\d+)\s+(?P<customer_name>.+))?$"
 )
+
+# Fixed-column offsets from the current rf2_userls report layout.
+# If a row is shorter or shifted, parsing falls back to split_middle_fields().
+DETAIL_DESCRIPTION_START = 41
+DETAIL_CUSTOMER_ID_START = 68
+DETAIL_CUSTOMER_NAME_START = 74
+DETAIL_PALLET_DATE_START = 94
 
 HEADER_PREFIXES = (
     "RF2 USER ACTIVITY LOG",
@@ -84,13 +92,20 @@ def clean_text(raw: str) -> str:
 
 
 def mmddyy_to_iso(value: str) -> str:
-    month, day, year = value.split("/")
-    return f"20{year}-{month}-{day}"
+    parsed = datetime.strptime(value, "%m/%d/%y")
+    return parsed.date().isoformat()
 
 
 def normalize_transtype(value: str) -> str:
     key = value.strip().lower()
     return TRANSACTION_NORMALIZATION.get(key, value.strip())
+
+
+def parse_int(value: str) -> int:
+    value = value.strip()
+    if value.endswith("-") and value[:-1].isdigit():
+        return -int(value[:-1])
+    return int(value)
 
 
 def should_skip_line(line: str) -> bool:
@@ -176,6 +191,22 @@ def split_middle_fields(middle: str) -> dict[str, Any]:
     }
 
 
+def split_detail_columns(line: str, middle: str) -> dict[str, Any]:
+    if len(line) >= DETAIL_PALLET_DATE_START:
+        description = line[DETAIL_DESCRIPTION_START:DETAIL_CUSTOMER_ID_START].strip()
+        customer_id = line[DETAIL_CUSTOMER_ID_START:DETAIL_CUSTOMER_NAME_START].strip()
+        customer_name = line[DETAIL_CUSTOMER_NAME_START:DETAIL_PALLET_DATE_START].strip()
+
+        if description or customer_id or customer_name:
+            return {
+                "description": description,
+                "customerId": customer_id or None,
+                "customerName": customer_name or None,
+            }
+
+    return split_middle_fields(middle)
+
+
 def finalize_user(user: dict[str, Any]) -> dict[str, Any] | None:
     if not user["userid"]:
         return None
@@ -217,9 +248,9 @@ def apply_total_pieces_line(user: dict[str, Any], stripped: str, last_route: str
 
     route = match.group("route") or last_route
     transtype = normalize_transtype(match.group("transtype"))
-    pieces = int(match.group("pieces"))
+    pieces = parse_int(match.group("pieces"))
 
-    if route:
+    if route and transtype == "Pick":
         route_total = ensure_route_totals(user, route)
         route_total["piecesByType"][transtype] = pieces
         last_route = route
@@ -254,14 +285,16 @@ def parse_file(path: str) -> dict[str, Any]:
     current = blank_user()
     users: list[dict[str, Any]] = []
     last_route_for_totals: str | None = None
+    last_transaction_date: str | None = None
 
     def flush_current() -> None:
-        nonlocal current, last_route_for_totals
+        nonlocal current, last_route_for_totals, last_transaction_date
         finalized = finalize_user(current)
         if finalized:
             users.append(finalized)
         current = blank_user()
         last_route_for_totals = None
+        last_transaction_date = None
 
     for raw_line in lines:
         line = raw_line.rstrip()
@@ -277,7 +310,7 @@ def parse_file(path: str) -> dict[str, Any]:
 
             current["userid"] = total_header_match.group("userid")
             current["name"] = total_header_match.group("name").strip()
-            current["inactiveMinutes"] = int(total_header_match.group("inactive"))
+            current["inactiveMinutes"] = parse_int(total_header_match.group("inactive"))
 
             rest = total_header_match.group("rest") or ""
             last_route_for_totals = apply_total_pieces_line(current, rest, last_route_for_totals)
@@ -288,6 +321,7 @@ def parse_file(path: str) -> dict[str, Any]:
         if no_activity_match and current["userid"]:
             current["noActivity"].append(
                 {
+                    "transDate": last_transaction_date,
                     "startTime": no_activity_match.group("start"),
                     "endTime": no_activity_match.group("end"),
                     "minutes": int(no_activity_match.group("minutes")),
@@ -311,16 +345,20 @@ def parse_file(path: str) -> dict[str, Any]:
         tx_match = TX_RE.match(line)
         if tx_match and current["userid"]:
             transtype = normalize_transtype(tx_match.group("transtype"))
-            qty = int(tx_match.group("qty"))
+            qty = parse_int(tx_match.group("qty"))
             route = tx_match.group("route")
-            middle = split_middle_fields(tx_match.group("middle"))
+            middle = split_detail_columns(line, tx_match.group("middle"))
+            trans_date = mmddyy_to_iso(tx_match.group("trans_date"))
+            last_transaction_date = trans_date
 
             tx = {
                 "route": route,
-                "transDate": mmddyy_to_iso(tx_match.group("trans_date")),
+                "transDate": trans_date,
                 "time": tx_match.group("time"),
                 "item": tx_match.group("item"),
+                "itemNumber": tx_match.group("item"),
                 "description": middle["description"],
+                "itemDescription": middle["description"],
                 "customerId": middle["customerId"],
                 "customerName": middle["customerName"],
                 "palletDate": mmddyy_to_iso(tx_match.group("pallet_date")),

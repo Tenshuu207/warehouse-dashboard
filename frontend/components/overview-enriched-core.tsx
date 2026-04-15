@@ -64,7 +64,7 @@ export default function OverviewEnrichedCore() {
         setLoading(true);
         setError(null);
 
-        const res = await fetch(`/api/dashboard/team-groups?date=${selectedWeek}`, {
+        const res = await fetch(`/api/dashboard/team-groups?date=${selectedWeek}&source=userls`, {
           cache: "no-store",
         });
         const json = (await res.json()) as TeamGroupsResponse & { details?: string };

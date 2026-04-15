@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 import { resolveNearestSnapshot } from "@/lib/server/db";
+import { buildUserlsOverviewWeek } from "@/lib/server/userls-overview";
 
 type AreaBucket = {
   areaCode?: string | null;
@@ -227,29 +228,48 @@ export async function GET(req: NextRequest) {
 
     let parsed: Record<string, unknown>;
     let resolvedDate = date;
-    let source: "sqlite" | "json" = "json";
+    let source: "sqlite" | "json" | "userls_daily" = "json";
+    const sourceMode = req.nextUrl.searchParams.get("source")?.trim() || "";
 
-    const resolvedDb = resolveNearestSnapshot<Record<string, unknown>>("daily_enriched", date);
-    if (resolvedDb) {
-      parsed = resolvedDb.payload;
-      resolvedDate = resolvedDb.resolvedKey;
-      source = "sqlite";
-    } else {
-      const resolved = await resolveNearestFile(dailyEnrichedDir(), date);
-      if (!resolved) {
+    if (sourceMode === "userls") {
+      const userlsOverview = await buildUserlsOverviewWeek(date);
+      if (!userlsOverview) {
         return NextResponse.json(
           {
             error: "team_groups_not_found",
             requestedDate: date,
-            details: "No daily_enriched files available",
+            details: "No UserLS daily summaries were found for Overview team groups",
           },
           { status: 404 }
         );
       }
 
-      parsed = JSON.parse(await fs.readFile(resolved.filePath, "utf-8")) as Record<string, unknown>;
-      resolvedDate = resolved.resolvedKey;
-      source = "json";
+      parsed = userlsOverview as Record<string, unknown>;
+      resolvedDate = String(userlsOverview.resolvedWeekStart || date);
+      source = "userls_daily";
+    } else {
+      const resolvedDb = resolveNearestSnapshot<Record<string, unknown>>("daily_enriched", date);
+      if (resolvedDb) {
+        parsed = resolvedDb.payload;
+        resolvedDate = resolvedDb.resolvedKey;
+        source = "sqlite";
+      } else {
+        const resolved = await resolveNearestFile(dailyEnrichedDir(), date);
+        if (!resolved) {
+          return NextResponse.json(
+            {
+              error: "team_groups_not_found",
+              requestedDate: date,
+              details: "No daily_enriched files available",
+            },
+            { status: 404 }
+          );
+        }
+
+        parsed = JSON.parse(await fs.readFile(resolved.filePath, "utf-8")) as Record<string, unknown>;
+        resolvedDate = resolved.resolvedKey;
+        source = "json";
+      }
     }
 
     const operators: OperatorRow[] = Array.isArray(parsed.operators) ? parsed.operators : [];
