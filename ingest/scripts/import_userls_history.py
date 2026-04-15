@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,34 @@ def run_cmd(cmd: list[str], cwd: Path) -> dict[str, Any]:
 def json_dump(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+
+
+def is_valid_business_date(value: str | None) -> bool:
+    if value is None:
+        return False
+    date_value = str(value).strip()
+    try:
+        datetime.strptime(date_value, "%Y-%m-%d")
+    except ValueError:
+        return False
+    return True
+
+
+def existing_userls_daily_dates(conn, userls_daily_dir: Path) -> set[str]:
+    file_dates = {
+        p.stem
+        for p in userls_daily_dir.glob("*.json")
+        if p.is_file() and is_valid_business_date(p.stem)
+    }
+    db_dates = {
+        row["date_key"]
+        for row in conn.execute(
+            "SELECT date_key FROM snapshots WHERE snapshot_type = ?",
+            ("userls_daily",),
+        ).fetchall()
+        if is_valid_business_date(row["date_key"])
+    }
+    return file_dates | db_dates
 
 
 def tx_key(userid: str, tx: dict[str, Any]) -> tuple[Any, ...]:
@@ -255,8 +284,8 @@ def main() -> int:
     conn = connect(args.db_path)
 
     existing_dates: set[str] = set()
-    if args.mode == "fill-missing" and userls_daily_dir.exists():
-        existing_dates = {p.stem for p in userls_daily_dir.glob("*.json") if p.is_file()}
+    if args.mode == "fill-missing":
+        existing_dates = existing_userls_daily_dates(conn, userls_daily_dir)
 
     parsed = parse_file(str(source_file))
     payloads_by_date, build_stats = build_day_payloads(

@@ -7,11 +7,12 @@ import subprocess
 import sys
 import uuid
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from common import save_json
-from db_sqlite import connect, utc_now_iso, upsert_dataset_component
+from db_sqlite import connect, utc_now_iso, upsert_dataset_component, upsert_snapshot
 from ingest_manifest import get_active_run
 from parse_rf2_userls import parse_file
 
@@ -23,7 +24,14 @@ ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 def is_valid_business_date(value: str | None) -> bool:
     if value is None:
         return False
-    return bool(ISO_DATE_RE.match(str(value).strip()))
+    date_value = str(value).strip()
+    if not ISO_DATE_RE.match(date_value):
+        return False
+    try:
+        datetime.strptime(date_value, "%Y-%m-%d")
+    except ValueError:
+        return False
+    return True
 
 
 def run_cmd(cmd: list[str]) -> dict[str, Any]:
@@ -159,28 +167,47 @@ def upsert_job(
 
 
 def replace_job_dates(conn, job_id: str, rows: list[dict[str, Any]]) -> None:
-    conn.execute("DELETE FROM userls_history_job_dates WHERE job_id = ?", (job_id,))
-    for row in rows:
-        conn.execute(
-            """
-            INSERT INTO userls_history_job_dates (
-                job_id, business_date, status, action, parsed_path, userls_daily_path,
-                daily_enriched_path, details_json, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                job_id,
-                row["businessDate"],
-                row["status"],
-                row.get("action"),
-                row.get("parsedPath"),
-                row.get("userlsDailyPath"),
-                row.get("dailyEnrichedPath"),
-                json_dumps(row.get("details", {})),
-                utc_now_iso(),
-            ),
-        )
-    conn.commit()
+    with conn:
+        conn.execute("DELETE FROM userls_history_job_dates WHERE job_id = ?", (job_id,))
+        now = utc_now_iso()
+        for row in rows:
+            conn.execute(
+                """
+                INSERT INTO userls_history_job_dates (
+                    job_id, business_date, status, action, parsed_path, userls_daily_path,
+                    daily_enriched_path, details_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    row["businessDate"],
+                    row["status"],
+                    row.get("action"),
+                    row.get("parsedPath"),
+                    row.get("userlsDailyPath"),
+                    row.get("dailyEnrichedPath"),
+                    json_dumps(row.get("details", {})),
+                    now,
+                ),
+            )
+
+
+def tx_key(userid: str, tx: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        userid,
+        tx.get("route") or "",
+        tx.get("transDate") or "",
+        tx.get("time") or "",
+        tx.get("item") or "",
+        tx.get("description") or "",
+        tx.get("customerId") or "",
+        tx.get("customerName") or "",
+        tx.get("palletDate") or "",
+        tx.get("transType") or "",
+        str(tx.get("bin") or "").upper(),
+        int(tx.get("qty", 0) or 0),
+        tx.get("unit") or "",
+    )
 
 
 def load_job(conn, job_id: str) -> dict[str, Any]:
@@ -281,6 +308,11 @@ def split_parsed_by_date(parsed: dict[str, Any]) -> dict[str, dict[str, Any]]:
     users = parsed.get("users", []) or []
     source_file = parsed.get("sourceFile")
     per_date_users: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    seen_by_date: dict[str, set[tuple[Any, ...]]] = defaultdict(set)
+    tx_rows_seen_by_date: dict[str, int] = defaultdict(int)
+    tx_rows_written_by_date: dict[str, int] = defaultdict(int)
+    duplicate_rows_skipped_by_date: dict[str, int] = defaultdict(int)
+    no_activity_rows_by_date: dict[str, int] = defaultdict(int)
 
     for user in users:
         tx_by_date: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -290,11 +322,19 @@ def split_parsed_by_date(parsed: dict[str, Any]) -> dict[str, dict[str, Any]]:
         for tx in user.get("transactions", []) or []:
             date_key = str(tx.get("transDate") or "").strip()
             if is_valid_business_date(date_key):
+                tx_rows_seen_by_date[date_key] += 1
+                key = tx_key(str(user.get("userid") or ""), tx)
+                if key in seen_by_date[date_key]:
+                    duplicate_rows_skipped_by_date[date_key] += 1
+                    continue
+                seen_by_date[date_key].add(key)
+                tx_rows_written_by_date[date_key] += 1
                 tx_by_date[date_key].append(tx)
 
         for row in user.get("noActivity", []) or []:
             date_key = str(row.get("transDate") or "").strip()
             if is_valid_business_date(date_key):
+                no_activity_rows_by_date[date_key] += 1
                 no_activity_by_date[date_key].append(row)
 
         for route_key, route_info in (user.get("routeTotals", {}) or {}).items():
@@ -320,12 +360,15 @@ def split_parsed_by_date(parsed: dict[str, Any]) -> dict[str, dict[str, Any]]:
             summary_by_type, summary = rebuild_user_summary_from_transactions(
                 day_transactions
             )
+            inactive_minutes = sum(
+                int(row.get("minutes", 0) or 0) for row in day_no_activity
+            )
 
             per_date_users[date_key].append(
                 {
                     "userid": user.get("userid"),
                     "name": user.get("name"),
-                    "inactiveMinutes": int(user.get("inactiveMinutes", 0) or 0),
+                    "inactiveMinutes": inactive_minutes,
                     "transactions": day_transactions,
                     "noActivity": day_no_activity,
                     "routeTotals": day_route_totals,
@@ -370,9 +413,23 @@ def split_parsed_by_date(parsed: dict[str, Any]) -> dict[str, dict[str, Any]]:
         per_date_payloads[date_key] = {
             "reportDate": date_key,
             "sourceFile": source_file,
+            "sourceReportStartDate": parsed.get("reportDate"),
             "users": rows,
             "totalsByType": dict(sorted(totals_by_type.items(), key=lambda kv: kv[0])),
             "summary": grand_summary,
+            "historyImportMeta": {
+                "txRowsSeen": tx_rows_seen_by_date.get(date_key, 0),
+                "txRowsWritten": tx_rows_written_by_date.get(date_key, 0),
+                "duplicateRowsSkipped": duplicate_rows_skipped_by_date.get(date_key, 0),
+                "noActivityRowsWritten": no_activity_rows_by_date.get(date_key, 0),
+                "routeTotalsPreserved": any(
+                    bool(user.get("routeTotals")) for user in rows
+                ),
+                "routeTotalsNote": (
+                    "RF2 UserLS route totals are preserved only when the source row "
+                    "carries an unambiguous transaction date."
+                ),
+            },
         }
 
     return per_date_payloads
@@ -409,6 +466,7 @@ def build_preview_rows(
             len(user.get("transactions", []) or [])
             for user in (payload.get("users", []) or [])
         )
+        import_meta = payload.get("historyImportMeta", {}) or {}
         coverage_exists = (
             has_active_raw
             or has_existing_parsed
@@ -427,6 +485,11 @@ def build_preview_rows(
                 "details": {
                     "userCount": user_count,
                     "transactionCount": transaction_count,
+                    "txRowsSeen": int(import_meta.get("txRowsSeen", transaction_count) or 0),
+                    "txRowsWritten": int(import_meta.get("txRowsWritten", transaction_count) or 0),
+                    "duplicateRowsSkipped": int(import_meta.get("duplicateRowsSkipped", 0) or 0),
+                    "noActivityRowsWritten": int(import_meta.get("noActivityRowsWritten", 0) or 0),
+                    "routeTotalsPreserved": bool(import_meta.get("routeTotalsPreserved")),
                     "hasActiveRawUserls": has_active_raw,
                     "activeRawSourcePath": active_raw.get("sourcePath")
                     if active_raw
@@ -450,12 +513,26 @@ def summarize_preview_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     total_transactions = sum(
         int(row["details"].get("transactionCount", 0) or 0) for row in rows
     )
+    tx_rows_seen = sum(int(row["details"].get("txRowsSeen", 0) or 0) for row in rows)
+    tx_rows_written = sum(
+        int(row["details"].get("txRowsWritten", 0) or 0) for row in rows
+    )
+    duplicate_rows_skipped = sum(
+        int(row["details"].get("duplicateRowsSkipped", 0) or 0) for row in rows
+    )
+    no_activity_rows_written = sum(
+        int(row["details"].get("noActivityRowsWritten", 0) or 0) for row in rows
+    )
     return {
         "totalDates": total_dates,
         "coveredDates": covered_dates,
         "missingDates": missing_dates,
         "totalUsersAcrossDates": total_users,
         "totalTransactionsAcrossDates": total_transactions,
+        "txRowsSeen": tx_rows_seen,
+        "txRowsWritten": tx_rows_written,
+        "duplicateRowsSkipped": duplicate_rows_skipped,
+        "noActivityRowsWritten": no_activity_rows_written,
     }
 
 
@@ -639,6 +716,26 @@ def apply_job(
             counts["failed"] += 1
             result_rows.append(row_out)
             continue
+
+        userls_daily_payload = json.loads(userls_daily_path.read_text())
+        upsert_snapshot(
+            conn,
+            snapshot_type="rf2_userls_parsed",
+            date_key=business_date,
+            payload=payload,
+            source_path=parsed_path,
+        )
+        upsert_snapshot(
+            conn,
+            snapshot_type="userls_daily",
+            date_key=business_date,
+            payload=userls_daily_payload,
+            source_path=userls_daily_path,
+        )
+        row_out["details"]["snapshots"] = {
+            "rf2UserlsParsed": "upserted",
+            "userlsDaily": "upserted",
+        }
 
         mark_component(
             conn,

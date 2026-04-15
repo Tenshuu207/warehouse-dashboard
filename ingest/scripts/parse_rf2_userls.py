@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import sys
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -91,8 +92,8 @@ def clean_text(raw: str) -> str:
 
 
 def mmddyy_to_iso(value: str) -> str:
-    month, day, year = value.split("/")
-    return f"20{year}-{month}-{day}"
+    parsed = datetime.strptime(value, "%m/%d/%y")
+    return parsed.date().isoformat()
 
 
 def normalize_transtype(value: str) -> str:
