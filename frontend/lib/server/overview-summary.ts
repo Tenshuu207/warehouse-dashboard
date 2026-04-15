@@ -383,8 +383,7 @@ export async function buildOverviewSummary(
     supportingDetail: {
       topAreas: areaDistribution.slice(0, 5),
       includedOperatorCount: currentTotals.operatorCount,
-      note:
-        "Overview includes UserLS non-pick receiving and replenishment work. Pick-only users are not included.",
+      note: "Extra is the fallback for low-confidence or outside-defined work.",
     },
   };
 }

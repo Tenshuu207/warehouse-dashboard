@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/lib/app-state";
-import PageHeader from "./shared/PageHeader";
 
 type Workload = {
   plates: number;
@@ -187,31 +186,28 @@ export default function OverviewEnrichedCore() {
 
   return (
     <section className="space-y-4">
-      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <PageHeader
-          title="Overview"
-          subtitle={`UserLS command summary for ${data.resolvedWeekStart} to ${data.resolvedWeekEnd}.`}
-        />
+      <div className="text-xs font-medium text-slate-500">
+        UserLS summary for {data.resolvedWeekStart} to {data.resolvedWeekEnd}
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
         <MetricBlock
-          title="Total Workload"
+          title="Total Plates"
           value={fmt(data.totalWorkload.plates)}
-          label={`${fmt(data.totalWorkload.pieces)} pieces across ${fmt(data.totalWorkload.operatorCount)} operators`}
-          className="lg:col-span-2"
+          label={`Included Operators: ${fmt(data.supportingDetail.includedOperatorCount)}`}
         >
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <div className="text-slate-500">Pieces / plate</div>
-              <div className="font-semibold text-slate-950">
-                {fmt(data.totalWorkload.avgPiecesPerPlate, 2)}
-              </div>
-            </div>
-            <div>
-              <div className="text-slate-500">Days loaded</div>
-              <div className="font-semibold text-slate-950">{fmt(data.sourceDates.length)}</div>
-            </div>
+          <div className="text-sm text-slate-600">
+            {fmt(data.sourceDates.length)} day{data.sourceDates.length === 1 ? "" : "s"} loaded
+          </div>
+        </MetricBlock>
+
+        <MetricBlock
+          title="Total Pieces"
+          value={fmt(data.totalWorkload.pieces)}
+          label={`${fmt(data.totalWorkload.avgPiecesPerPlate, 2)} pieces / plate`}
+        >
+          <div className="text-sm text-slate-600">
+            Same included operator set as total plates
           </div>
         </MetricBlock>
 
@@ -274,8 +270,7 @@ export default function OverviewEnrichedCore() {
       </MetricBlock>
 
       <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
-        {data.supportingDetail.note} Extra remains the fallback for low-confidence or outside-defined
-        work.
+        {data.supportingDetail.note}
       </div>
     </section>
   );

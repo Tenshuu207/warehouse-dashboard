@@ -146,7 +146,6 @@ type Row = {
   primaryUserid: string;
   rfUsernames: string[];
   name: string;
-  role: string;
   area: string;
   letdownPlates: number;
   letdownPieces: number;
@@ -304,13 +303,6 @@ export default function WeeklySheetView({
       const employeeId = resolved.employeeId || null;
       const rowKey = mergeKeyForEmployee(employeeId, name || fallbackName, userid);
 
-      const role = String(
-        op.effectiveAssignedRole ||
-          op.currentRole ||
-          op.rawAssignedRole ||
-          "—"
-      );
-
       const area = String(
         op.effectivePerformanceArea ||
           op.rawDominantArea ||
@@ -337,7 +329,6 @@ export default function WeeklySheetView({
           primaryUserid: userid,
           rfUsernames: [userid],
           name,
-          role,
           area,
           letdownPlates,
           letdownPieces,
@@ -366,13 +357,6 @@ export default function WeeklySheetView({
       existing.totalPieces += totalPieces;
       existing.receivingPlates += receivingPlates;
       existing.receivingPieces += receivingPieces;
-
-      if (
-        existing.role === "—" &&
-        role !== "—"
-      ) {
-        existing.role = role;
-      }
 
       if (
         (existing.area === "Other" || !existing.area) &&
@@ -619,7 +603,6 @@ export default function WeeklySheetView({
               <thead>
                 <tr className="bg-blue-700 text-white">
                   <th className="border border-slate-900 px-3 py-2 text-left">Operator</th>
-                  <th className="border border-slate-900 px-3 py-2 text-left">Role</th>
                   <th className="border border-slate-900 px-3 py-2 text-center" colSpan={2}>
                     Letdowns
                   </th>
@@ -637,7 +620,6 @@ export default function WeeklySheetView({
                   </th>
                 </tr>
                 <tr className="bg-slate-100 text-slate-900">
-                  <th className="border border-slate-900 px-3 py-1.5 text-left"></th>
                   <th className="border border-slate-900 px-3 py-1.5 text-left"></th>
                   <th className="border border-slate-900 px-3 py-1.5 text-center">Plates</th>
                   <th className="border border-slate-900 px-3 py-1.5 text-center">Pieces</th>
@@ -664,7 +646,6 @@ export default function WeeklySheetView({
                         RF IDs: {row.rfUsernames.join(", ")}
                       </div>
                     </td>
-                    <td className="border border-slate-900 px-3 py-1.5">{row.role}</td>
                     <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
                       {fmt(row.letdownPlates)}
                     </td>
@@ -696,7 +677,7 @@ export default function WeeklySheetView({
                 ))}
 
                 <tr className="font-bold">
-                  <td className="border border-slate-900 bg-slate-100 px-3 py-2" colSpan={2}>
+                  <td className="border border-slate-900 bg-slate-100 px-3 py-2">
                     Week Total
                   </td>
                   <td className="border border-slate-900 bg-blue-50 px-3 py-2 text-right text-red-600">
