@@ -25,12 +25,15 @@ type AlignmentRow = {
   forcedRole?: string | null;
   forcedArea?: string | null;
   notes?: string | null;
+  effectiveRole?: string | null;
+  effectiveArea?: string | null;
   alignmentStatus?: string | null;
 };
 
 type ApiPayload = {
   year: number;
   count: number;
+  saveSupported?: boolean;
   rows: AlignmentRow[];
 };
 
@@ -45,6 +48,13 @@ type OverrideDraft = {
   forcedArea: string;
   notes: string;
 };
+
+type ReviewMode = "active" | "processed";
+
+type EditorFeedback = {
+  tone: "success" | "error" | "info";
+  text: string;
+} | null;
 
 function formatNumber(value: number | null | undefined) {
   if (value === null || value === undefined) return "-";
@@ -87,11 +97,11 @@ function draftFromRow(row: AlignmentRow): OverrideDraft {
 }
 
 function effectiveRole(row: AlignmentRow, draft?: OverrideDraft) {
-  return draft?.forcedRole || row.forcedRole || row.primaryRole || "";
+  return draft?.forcedRole || row.effectiveRole || row.forcedRole || row.primaryRole || "";
 }
 
 function effectiveArea(row: AlignmentRow, draft?: OverrideDraft) {
-  return draft?.forcedArea || row.forcedArea || row.primaryArea || "";
+  return draft?.forcedArea || row.effectiveArea || row.forcedArea || row.primaryArea || "";
 }
 
 function alignmentStatus(row: AlignmentRow, draft?: OverrideDraft) {
@@ -100,6 +110,15 @@ function alignmentStatus(row: AlignmentRow, draft?: OverrideDraft) {
     return "Override drafted";
   }
   return row.reviewFlag ? "Needs review" : "Aligned";
+}
+
+function hasOverride(row: AlignmentRow) {
+  return Boolean(row.forcedRole || row.forcedArea || row.notes?.trim());
+}
+
+function needsReview(row: AlignmentRow) {
+  const status = String(row.alignmentStatus || "").toLowerCase();
+  return row.reviewFlag || status.includes("review");
 }
 
 export default function HistoricalRoleAlignmentPage() {
@@ -112,15 +131,23 @@ export default function HistoricalRoleAlignmentPage() {
   });
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, OverrideDraft>>({});
+  const [mode, setMode] = useState<ReviewMode>("active");
+  const [search, setSearch] = useState("");
+  const [showDetails, setShowDetails] = useState(false);
   const [loading, setLoading] = useState(true);
   const [savingUser, setSavingUser] = useState<string | null>(null);
+  const [saveSupported, setSaveSupported] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [editorFeedback, setEditorFeedback] = useState<EditorFeedback>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const loadRows = useCallback(async () => {
+  const loadRows = useCallback(async (nextSelection?: string | null, keepFeedback = false) => {
     setLoading(true);
     setError(null);
-    setMessage(null);
+    if (!keepFeedback) {
+      setMessage(null);
+      setEditorFeedback(null);
+    }
 
     try {
       const [res, optionsRes] = await Promise.all([
@@ -150,6 +177,7 @@ export default function HistoricalRoleAlignmentPage() {
       }
 
       setPayload(nextPayload);
+      setSaveSupported(nextPayload.saveSupported === true);
       setOptions({
         areas: Array.isArray(optionsJson.areas) ? optionsJson.areas : [],
         roles: Array.isArray(optionsJson.roles) ? optionsJson.roles : [],
@@ -159,6 +187,9 @@ export default function HistoricalRoleAlignmentPage() {
       });
       setDrafts(nextDrafts);
       setSelectedKey((current) => {
+        if (nextSelection !== undefined) {
+          return nextSelection;
+        }
         if (current && nextPayload.rows.some((row) => rowKey(row) === current)) {
           return current;
         }
@@ -181,6 +212,8 @@ export default function HistoricalRoleAlignmentPage() {
     return {
       operators: rows.length,
       reviewFlags: rows.filter((row) => row.reviewFlag).length,
+      activeQueue: rows.filter((row) => needsReview(row) && !hasOverride(row)).length,
+      processed: rows.filter((row) => hasOverride(row)).length,
       replPlates: rows.reduce((sum, row) => sum + row.yearlyReplPlates, 0),
       receivingPlates: rows.reduce((sum, row) => sum + row.yearlyReceivingPlates, 0),
       pickPlates: rows.reduce((sum, row) => sum + row.yearlyPickPlates, 0),
@@ -188,11 +221,56 @@ export default function HistoricalRoleAlignmentPage() {
   }, [payload]);
 
   const selectedRow = useMemo(() => {
+    if (!selectedKey) return null;
     const rows = payload?.rows || [];
-    return rows.find((row) => rowKey(row) === selectedKey) || rows[0] || null;
+    return rows.find((row) => rowKey(row) === selectedKey) || null;
   }, [payload, selectedKey]);
 
   const selectedDraft = selectedRow ? drafts[rowKey(selectedRow)] : undefined;
+
+  const activeRows = useMemo(
+    () => (payload?.rows || []).filter((row) => needsReview(row) && !hasOverride(row)),
+    [payload]
+  );
+
+  const processedRows = useMemo(
+    () => (payload?.rows || []).filter((row) => hasOverride(row)),
+    [payload]
+  );
+
+  const baseRows = mode === "active" ? activeRows : processedRows;
+
+  const visibleRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return baseRows;
+
+    return baseRows.filter((row) =>
+      [
+        row.userid,
+        row.name,
+        row.primaryRole,
+        row.primaryArea,
+        row.effectiveRole,
+        row.effectiveArea,
+        row.forcedRole,
+        row.forcedArea,
+        row.notes,
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(q))
+    );
+  }, [baseRows, search]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (visibleRows.length === 0) {
+      setSelectedKey(null);
+      return;
+    }
+    if (!selectedKey || !visibleRows.some((row) => rowKey(row) === selectedKey)) {
+      setSelectedKey(rowKey(visibleRows[0]));
+    }
+  }, [loading, selectedKey, visibleRows]);
 
   function updateDraft(key: string, patch: Partial<OverrideDraft>) {
     setDrafts((current) => ({
@@ -209,11 +287,27 @@ export default function HistoricalRoleAlignmentPage() {
   }
 
   async function saveOverride(row: AlignmentRow, draft: OverrideDraft) {
+    if (!saveSupported) {
+      setEditorFeedback({
+        tone: "error",
+        text: "Historical override save API is unavailable.",
+      });
+      return;
+    }
+
     setSavingUser(row.userid);
     setError(null);
     setMessage(null);
+    setEditorFeedback({
+      tone: "info",
+      text: "Saving override...",
+    });
 
     try {
+      const isClear = !draft.forcedRole.trim() && !draft.forcedArea.trim() && !draft.notes.trim();
+      const nextRow =
+        visibleRows.find((candidate) => rowKey(candidate) !== rowKey(row)) || null;
+
       const res = await fetch("/api/historical-role-alignment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -234,10 +328,18 @@ export default function HistoricalRoleAlignmentPage() {
         );
       }
 
-      setMessage(`Saved override for ${row.name || row.userid}.`);
-      await loadRows();
+      const actionText = isClear ? "Cleared override" : "Saved override";
+      setMessage(`${actionText} for ${row.name || row.userid}.`);
+      setEditorFeedback({
+        tone: "success",
+        text: `${actionText}. ${nextRow ? `Moved to ${nextRow.name || nextRow.userid}.` : "No more rows in this list."}`,
+      });
+      await loadRows(nextRow ? rowKey(nextRow) : null, true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save historical override");
+      setEditorFeedback({
+        tone: "error",
+        text: err instanceof Error ? err.message : "Failed to save historical override",
+      });
     } finally {
       setSavingUser(null);
     }
@@ -281,20 +383,20 @@ export default function HistoricalRoleAlignmentPage() {
             <div className="mt-1 text-xl font-semibold">{formatNumber(summary.operators)}</div>
           </div>
           <div className="rounded-xl border bg-white p-3 shadow-sm">
-            <div className="text-xs text-slate-500">Review Flags</div>
-            <div className="mt-1 text-xl font-semibold">{formatNumber(summary.reviewFlags)}</div>
+            <div className="text-xs text-slate-500">Active Queue</div>
+            <div className="mt-1 text-xl font-semibold">{formatNumber(summary.activeQueue)}</div>
+          </div>
+          <div className="rounded-xl border bg-white p-3 shadow-sm">
+            <div className="text-xs text-slate-500">Processed</div>
+            <div className="mt-1 text-xl font-semibold">{formatNumber(summary.processed)}</div>
           </div>
           <div className="rounded-xl border bg-white p-3 shadow-sm">
             <div className="text-xs text-slate-500">Repl Plates</div>
             <div className="mt-1 text-xl font-semibold">{formatNumber(summary.replPlates)}</div>
           </div>
           <div className="rounded-xl border bg-white p-3 shadow-sm">
-            <div className="text-xs text-slate-500">Receiving Plates</div>
-            <div className="mt-1 text-xl font-semibold">{formatNumber(summary.receivingPlates)}</div>
-          </div>
-          <div className="rounded-xl border bg-white p-3 shadow-sm">
-            <div className="text-xs text-slate-500">Pick Plates</div>
-            <div className="mt-1 text-xl font-semibold">{formatNumber(summary.pickPlates)}</div>
+            <div className="text-xs text-slate-500">Review Flags</div>
+            <div className="mt-1 text-xl font-semibold">{formatNumber(summary.reviewFlags)}</div>
           </div>
         </section>
 
@@ -312,14 +414,65 @@ export default function HistoricalRoleAlignmentPage() {
 
         <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
           <div className="overflow-hidden rounded-2xl border bg-white shadow-sm">
-            <div className="border-b px-4 py-3">
-              <h2 className="text-sm font-semibold">Review Rows</h2>
-              <p className="mt-1 text-xs text-slate-500">
-                Click a row to edit overrides in the side panel. Sorted by review flag, role share, then replenishment plates.
-              </p>
+            <div className="space-y-3 border-b px-4 py-3">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold">
+                    {mode === "active" ? "Active Review" : "Processed / Overridden"}
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {mode === "active"
+                      ? "Rows here still need review and have no saved override."
+                      : "Rows here already have a saved forced role, forced area, or note."}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    className={[
+                      "rounded-md border px-3 py-2 text-sm font-medium",
+                      mode === "active"
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
+                    ].join(" ")}
+                    onClick={() => setMode("active")}
+                    type="button"
+                  >
+                    Active Review ({formatNumber(activeRows.length)})
+                  </button>
+                  <button
+                    className={[
+                      "rounded-md border px-3 py-2 text-sm font-medium",
+                      mode === "processed"
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
+                    ].join(" ")}
+                    onClick={() => setMode("processed")}
+                    type="button"
+                  >
+                    Processed / Overridden ({formatNumber(processedRows.length)})
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <input
+                  className="w-full rounded-md border px-3 py-2 text-sm md:max-w-sm"
+                  placeholder="Search operator, role, area, note..."
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+                <button
+                  className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  onClick={() => setShowDetails((current) => !current)}
+                  type="button"
+                >
+                  {showDetails ? "Hide details" : "Show details"}
+                </button>
+              </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="min-w-[1320px] text-left text-sm">
+              <table className={`${showDetails ? "min-w-[1280px]" : "min-w-[860px]"} text-left text-sm`}>
                 <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="sticky left-0 z-30 w-56 whitespace-nowrap border-r bg-slate-50 px-3 py-2">
@@ -334,37 +487,44 @@ export default function HistoricalRoleAlignmentPage() {
                     <th className="sticky left-[512px] z-30 w-28 whitespace-nowrap border-r bg-slate-50 px-3 py-2 text-right">
                       Repl Plates
                     </th>
-                    <th className="whitespace-nowrap px-3 py-2">UserID</th>
                     <th className="whitespace-nowrap px-3 py-2">Role Share</th>
                     <th className="whitespace-nowrap px-3 py-2">Area Share</th>
-                    <th className="whitespace-nowrap px-3 py-2 text-right">Repl Pieces</th>
-                    <th className="whitespace-nowrap px-3 py-2 text-right">Receiving Plates</th>
-                    <th className="whitespace-nowrap px-3 py-2 text-right">Pick Plates</th>
-                    <th className="whitespace-nowrap px-3 py-2 text-right">Active Weeks</th>
-                    <th className="whitespace-nowrap px-3 py-2">Role Confidence</th>
-                    <th className="whitespace-nowrap px-3 py-2">Area Confidence</th>
-                    <th className="whitespace-nowrap px-3 py-2">Review Flag</th>
+                    <th className="whitespace-nowrap px-3 py-2">Anomaly</th>
+                    <th className="whitespace-nowrap px-3 py-2">Status</th>
+                    {showDetails ? (
+                      <>
+                        <th className="whitespace-nowrap px-3 py-2">UserID</th>
+                        <th className="whitespace-nowrap px-3 py-2 text-right">Repl Pieces</th>
+                        <th className="whitespace-nowrap px-3 py-2 text-right">Receiving Plates</th>
+                        <th className="whitespace-nowrap px-3 py-2 text-right">Pick Plates</th>
+                        <th className="whitespace-nowrap px-3 py-2 text-right">Active Weeks</th>
+                        <th className="whitespace-nowrap px-3 py-2">Role Confidence</th>
+                        <th className="whitespace-nowrap px-3 py-2">Area Confidence</th>
+                      </>
+                    ) : null}
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {loading ? (
                     <tr>
-                      <td className="px-3 py-4 text-slate-500" colSpan={14}>
+                      <td className="px-3 py-4 text-slate-500" colSpan={showDetails ? 15 : 8}>
                         Loading alignment rows...
                       </td>
                     </tr>
                   ) : null}
 
-                  {!loading && payload?.rows.length === 0 ? (
+                  {!loading && visibleRows.length === 0 ? (
                     <tr>
-                      <td className="px-3 py-4 text-slate-500" colSpan={14}>
-                        No historical role alignment rows found for {year}.
+                      <td className="px-3 py-4 text-slate-500" colSpan={showDetails ? 15 : 8}>
+                        {mode === "active"
+                          ? "No active review rows match the current filters."
+                          : "No processed override rows match the current filters."}
                       </td>
                     </tr>
                   ) : null}
 
                   {!loading
-                    ? payload?.rows.map((row) => {
+                    ? visibleRows.map((row) => {
                         const key = rowKey(row);
                         const selected = key === selectedKey;
                         const stickyBg = selected ? "bg-blue-50" : "bg-white";
@@ -416,45 +576,10 @@ export default function HistoricalRoleAlignmentPage() {
                               {formatNumber(row.yearlyReplPlates)}
                             </td>
                             <td className="whitespace-nowrap px-3 py-2 text-slate-600">
-                              {row.userid}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2">
                               {formatPercent(row.primaryRoleShare)}
                             </td>
                             <td className="whitespace-nowrap px-3 py-2">
                               {formatPercent(row.primaryAreaShare)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2 text-right">
-                              {formatNumber(row.yearlyReplPieces)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2 text-right">
-                              {formatNumber(row.yearlyReceivingPlates)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2 text-right">
-                              {formatNumber(row.yearlyPickPlates)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2 text-right">
-                              {formatNumber(row.activeWeeks)}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2">
-                              <span
-                                className={[
-                                  "inline-flex rounded-full border px-2 py-0.5 text-xs font-medium capitalize",
-                                  confidenceClasses(row.roleConfidence),
-                                ].join(" ")}
-                              >
-                                {row.roleConfidence}
-                              </span>
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2">
-                              <span
-                                className={[
-                                  "inline-flex rounded-full border px-2 py-0.5 text-xs font-medium capitalize",
-                                  confidenceClasses(row.areaConfidence),
-                                ].join(" ")}
-                              >
-                                {row.areaConfidence}
-                              </span>
                             </td>
                             <td className="whitespace-nowrap px-3 py-2">
                               <span
@@ -466,6 +591,59 @@ export default function HistoricalRoleAlignmentPage() {
                                 {row.reviewFlag ? "Review" : "OK"}
                               </span>
                             </td>
+                            <td className="whitespace-nowrap px-3 py-2">
+                              <span
+                                className={[
+                                  "inline-flex rounded-full border px-2 py-0.5 text-xs font-medium",
+                                  hasOverride(row)
+                                    ? "border-blue-200 bg-blue-50 text-blue-800"
+                                    : row.reviewFlag
+                                      ? "border-amber-200 bg-amber-50 text-amber-800"
+                                      : "border-emerald-200 bg-emerald-50 text-emerald-800",
+                                ].join(" ")}
+                              >
+                                {alignmentStatus(row)}
+                              </span>
+                            </td>
+                            {showDetails ? (
+                              <>
+                                <td className="whitespace-nowrap px-3 py-2 text-slate-600">
+                                  {row.userid}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2 text-right">
+                                  {formatNumber(row.yearlyReplPieces)}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2 text-right">
+                                  {formatNumber(row.yearlyReceivingPlates)}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2 text-right">
+                                  {formatNumber(row.yearlyPickPlates)}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2 text-right">
+                                  {formatNumber(row.activeWeeks)}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2">
+                                  <span
+                                    className={[
+                                      "inline-flex rounded-full border px-2 py-0.5 text-xs font-medium capitalize",
+                                      confidenceClasses(row.roleConfidence),
+                                    ].join(" ")}
+                                  >
+                                    {row.roleConfidence}
+                                  </span>
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-2">
+                                  <span
+                                    className={[
+                                      "inline-flex rounded-full border px-2 py-0.5 text-xs font-medium capitalize",
+                                      confidenceClasses(row.areaConfidence),
+                                    ].join(" ")}
+                                  >
+                                    {row.areaConfidence}
+                                  </span>
+                                </td>
+                              </>
+                            ) : null}
                           </tr>
                         );
                       })
@@ -485,6 +663,21 @@ export default function HistoricalRoleAlignmentPage() {
 
             {selectedRow && selectedDraft ? (
               <div className="space-y-4 p-4">
+                {editorFeedback ? (
+                  <div
+                    className={[
+                      "rounded-lg border p-3 text-sm font-medium",
+                      editorFeedback.tone === "success"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        : editorFeedback.tone === "error"
+                          ? "border-red-200 bg-red-50 text-red-700"
+                          : "border-sky-200 bg-sky-50 text-sky-800",
+                    ].join(" ")}
+                  >
+                    {editorFeedback.text}
+                  </div>
+                ) : null}
+
                 <div>
                   <div className="text-lg font-semibold">{selectedRow.name || selectedRow.userid}</div>
                   <div className="text-xs text-slate-500">{selectedRow.userid}</div>
@@ -582,7 +775,7 @@ export default function HistoricalRoleAlignmentPage() {
                     disabled={savingUser === selectedRow.userid}
                     onClick={() => void saveOverride(selectedRow, selectedDraft)}
                   >
-                    Save override
+                    {savingUser === selectedRow.userid ? "Saving..." : "Save override"}
                   </button>
                   <button
                     className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
@@ -593,7 +786,7 @@ export default function HistoricalRoleAlignmentPage() {
                       void saveOverride(selectedRow, cleared);
                     }}
                   >
-                    Clear override
+                    {savingUser === selectedRow.userid ? "Clearing..." : "Clear override"}
                   </button>
                   <button
                     className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"

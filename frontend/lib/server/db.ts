@@ -109,6 +109,16 @@ function ensureSchema(db: DbHandle) {
 
     CREATE INDEX IF NOT EXISTS idx_historical_role_alignment_year_review
       ON historical_role_alignment (year, review_flag, primary_role);
+
+    CREATE TABLE IF NOT EXISTS historical_role_alignment_overrides (
+      year INTEGER NOT NULL,
+      subject_key TEXT NOT NULL,
+      forced_role TEXT,
+      forced_area TEXT,
+      notes TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (year, subject_key)
+    );
   `);
 }
 

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listHistoricalRoleAlignment } from "@/lib/server/historical-role-alignment";
+import {
+  listHistoricalRoleAlignment,
+  saveHistoricalRoleAlignmentOverride,
+} from "@/lib/server/historical-role-alignment";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,12 +23,43 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       year,
       count: rows.length,
+      saveSupported: true,
       rows,
     });
   } catch (error) {
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 400 }
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = (await request.json()) as {
+      year?: unknown;
+      userid?: unknown;
+      forcedRole?: unknown;
+      forcedArea?: unknown;
+      notes?: unknown;
+    };
+
+    const result = saveHistoricalRoleAlignmentOverride({
+      year: parseYear(String(body.year || "")),
+      userid: typeof body.userid === "string" ? body.userid : "",
+      forcedRole: typeof body.forcedRole === "string" ? body.forcedRole : null,
+      forcedArea: typeof body.forcedArea === "string" ? body.forcedArea : null,
+      notes: typeof body.notes === "string" ? body.notes : "",
+    });
+
+    return NextResponse.json(result);
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: "historical_role_alignment_override_save_failed",
+        details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 400 }
     );
