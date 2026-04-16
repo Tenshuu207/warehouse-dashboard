@@ -24,10 +24,25 @@ type AlignmentRow = {
   reviewFlag: boolean;
   forcedRole?: string | null;
   forcedArea?: string | null;
+  overrideStartDate?: string | null;
+  overrideEndDate?: string | null;
   notes?: string | null;
   effectiveRole?: string | null;
   effectiveArea?: string | null;
   alignmentStatus?: string | null;
+  suggestedReviewSegments?: SuggestedReviewSegment[];
+};
+
+type SuggestedReviewSegment = {
+  startDate: string;
+  endDate: string;
+  suggestedArea: string | null;
+  suggestedRole: string | null;
+  areaShare: number | null;
+  roleShare: number | null;
+  replenishmentPlates: number;
+  segmentType: "stable" | "likely_shift" | "mixed" | "uncovered_gap" | "low_confidence";
+  reason: string;
 };
 
 type ApiPayload = {
@@ -44,6 +59,8 @@ type OptionsPayload = {
 };
 
 type OverrideDraft = {
+  startDate: string;
+  endDate: string;
   forcedRole: string;
   forcedArea: string;
   notes: string;
@@ -90,6 +107,8 @@ function rowKey(row: AlignmentRow) {
 
 function draftFromRow(row: AlignmentRow): OverrideDraft {
   return {
+    startDate: row.overrideStartDate || "",
+    endDate: row.overrideEndDate || "",
     forcedRole: row.forcedRole || "",
     forcedArea: row.forcedArea || "",
     notes: row.notes || "",
@@ -113,12 +132,43 @@ function alignmentStatus(row: AlignmentRow, draft?: OverrideDraft) {
 }
 
 function hasOverride(row: AlignmentRow) {
-  return Boolean(row.forcedRole || row.forcedArea || row.notes?.trim());
+  return Boolean(row.forcedRole || row.forcedArea || row.overrideStartDate || row.overrideEndDate || row.notes?.trim());
 }
 
 function needsReview(row: AlignmentRow) {
   const status = String(row.alignmentStatus || "").toLowerCase();
   return row.reviewFlag || status.includes("review");
+}
+
+function segmentTypeLabel(type: SuggestedReviewSegment["segmentType"]) {
+  switch (type) {
+    case "likely_shift":
+      return "Likely shift";
+    case "uncovered_gap":
+      return "Uncovered";
+    case "low_confidence":
+      return "Low confidence";
+    case "mixed":
+      return "Mixed";
+    case "stable":
+    default:
+      return "Stable";
+  }
+}
+
+function segmentTone(type: SuggestedReviewSegment["segmentType"]) {
+  switch (type) {
+    case "uncovered_gap":
+      return "border-amber-300 bg-amber-50 hover:bg-amber-100";
+    case "likely_shift":
+      return "border-sky-300 bg-sky-50 hover:bg-sky-100";
+    case "mixed":
+    case "low_confidence":
+      return "border-orange-300 bg-orange-50 hover:bg-orange-100";
+    case "stable":
+    default:
+      return "border-slate-200 bg-white hover:bg-slate-50";
+  }
 }
 
 export default function HistoricalRoleAlignmentPage() {
@@ -227,6 +277,7 @@ export default function HistoricalRoleAlignmentPage() {
   }, [payload, selectedKey]);
 
   const selectedDraft = selectedRow ? drafts[rowKey(selectedRow)] : undefined;
+  const selectedSegments = selectedRow?.suggestedReviewSegments || [];
 
   const activeRows = useMemo(
     () => (payload?.rows || []).filter((row) => needsReview(row) && !hasOverride(row)),
@@ -277,6 +328,8 @@ export default function HistoricalRoleAlignmentPage() {
       ...current,
       [key]: {
         ...(current[key] || {
+          startDate: "",
+          endDate: "",
           forcedRole: "",
           forcedArea: "",
           notes: "",
@@ -304,7 +357,12 @@ export default function HistoricalRoleAlignmentPage() {
     });
 
     try {
-      const isClear = !draft.forcedRole.trim() && !draft.forcedArea.trim() && !draft.notes.trim();
+      const isClear =
+        !draft.startDate.trim() &&
+        !draft.endDate.trim() &&
+        !draft.forcedRole.trim() &&
+        !draft.forcedArea.trim() &&
+        !draft.notes.trim();
       const nextRow =
         visibleRows.find((candidate) => rowKey(candidate) !== rowKey(row)) || null;
 
@@ -314,6 +372,8 @@ export default function HistoricalRoleAlignmentPage() {
         body: JSON.stringify({
           year: row.year,
           userid: row.userid,
+          startDate: draft.startDate || null,
+          endDate: draft.endDate || null,
           forcedRole: draft.forcedRole || null,
           forcedArea: draft.forcedArea || null,
           notes: draft.notes || "",
@@ -721,6 +781,100 @@ export default function HistoricalRoleAlignmentPage() {
                 </div>
 
                 <div className="grid grid-cols-1 gap-3">
+                  <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-sm font-semibold">Suggested Review Segments</h3>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Click a segment to prefill the date range, role, and area.
+                        </p>
+                      </div>
+                      <span className="rounded-full border bg-white px-2 py-0.5 text-xs font-medium text-slate-600">
+                        {formatNumber(selectedSegments.length)}
+                      </span>
+                    </div>
+
+                    {selectedSegments.length > 0 ? (
+                      <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                        {selectedSegments.map((segment) => (
+                          <button
+                            key={`${segment.startDate}-${segment.endDate}-${segment.suggestedArea || "area"}-${segment.suggestedRole || "role"}`}
+                            className={[
+                              "w-full rounded-md border p-2 text-left text-xs transition",
+                              segmentTone(segment.segmentType),
+                            ].join(" ")}
+                            onClick={() =>
+                              updateDraft(rowKey(selectedRow), {
+                                startDate: segment.startDate,
+                                endDate: segment.endDate,
+                                forcedRole: segment.suggestedRole || "",
+                                forcedArea: segment.suggestedArea || "",
+                              })
+                            }
+                            type="button"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="font-semibold text-slate-900">
+                                {segment.startDate} to {segment.endDate}
+                              </div>
+                              <span className="shrink-0 rounded-full border bg-white px-2 py-0.5 font-medium text-slate-700">
+                                {segmentTypeLabel(segment.segmentType)}
+                              </span>
+                            </div>
+                            <div className="mt-1 grid grid-cols-2 gap-2 text-slate-700">
+                              <div>
+                                <span className="text-slate-500">Area: </span>
+                                <span className="font-medium">
+                                  {segment.suggestedArea || "-"} ({formatPercent(segment.areaShare)})
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-slate-500">Role: </span>
+                                <span className="font-medium">
+                                  {segment.suggestedRole || "-"} ({formatPercent(segment.roleShare)})
+                                </span>
+                              </div>
+                            </div>
+                            <div className="mt-1 text-slate-600">
+                              Plates: {formatNumber(segment.replenishmentPlates)}
+                            </div>
+                            <div className="mt-1 text-slate-600">{segment.reason}</div>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-md border border-dashed bg-white p-3 text-xs text-slate-500">
+                        No monthly replenishment periods were available for this operator.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="space-y-1">
+                      <span className="text-xs font-medium text-slate-500">Override start date</span>
+                      <input
+                        className="w-full rounded-md border px-3 py-2 text-sm"
+                        type="date"
+                        value={selectedDraft.startDate}
+                        onChange={(event) =>
+                          updateDraft(rowKey(selectedRow), { startDate: event.target.value })
+                        }
+                      />
+                    </label>
+
+                    <label className="space-y-1">
+                      <span className="text-xs font-medium text-slate-500">Override end date</span>
+                      <input
+                        className="w-full rounded-md border px-3 py-2 text-sm"
+                        type="date"
+                        value={selectedDraft.endDate}
+                        onChange={(event) =>
+                          updateDraft(rowKey(selectedRow), { endDate: event.target.value })
+                        }
+                      />
+                    </label>
+                  </div>
+
                   <label className="space-y-1">
                     <span className="text-xs font-medium text-slate-500">Forced role</span>
                     <select
@@ -781,7 +935,13 @@ export default function HistoricalRoleAlignmentPage() {
                     className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
                     disabled={savingUser === selectedRow.userid}
                     onClick={() => {
-                      const cleared = { forcedRole: "", forcedArea: "", notes: "" };
+                      const cleared = {
+                        startDate: "",
+                        endDate: "",
+                        forcedRole: "",
+                        forcedArea: "",
+                        notes: "",
+                      };
                       updateDraft(rowKey(selectedRow), cleared);
                       void saveOverride(selectedRow, cleared);
                     }}
@@ -792,6 +952,8 @@ export default function HistoricalRoleAlignmentPage() {
                     className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
                     onClick={() =>
                       updateDraft(rowKey(selectedRow), {
+                        startDate: "",
+                        endDate: "",
                         forcedRole: selectedRow.primaryRole || "",
                         forcedArea: selectedRow.primaryArea || "",
                       })

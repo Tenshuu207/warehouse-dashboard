@@ -113,6 +113,8 @@ function ensureSchema(db: DbHandle) {
     CREATE TABLE IF NOT EXISTS historical_role_alignment_overrides (
       year INTEGER NOT NULL,
       subject_key TEXT NOT NULL,
+      start_date TEXT,
+      end_date TEXT,
       forced_role TEXT,
       forced_area TEXT,
       notes TEXT NOT NULL DEFAULT '',
@@ -120,6 +122,19 @@ function ensureSchema(db: DbHandle) {
       PRIMARY KEY (year, subject_key)
     );
   `);
+
+  const overrideColumns = db
+    .prepare(`PRAGMA table_info(historical_role_alignment_overrides)`)
+    .all() as Array<{ name: string }>;
+  const overrideColumnNames = new Set(overrideColumns.map((column) => column.name));
+
+  if (!overrideColumnNames.has("start_date")) {
+    db.exec(`ALTER TABLE historical_role_alignment_overrides ADD COLUMN start_date TEXT`);
+  }
+
+  if (!overrideColumnNames.has("end_date")) {
+    db.exec(`ALTER TABLE historical_role_alignment_overrides ADD COLUMN end_date TEXT`);
+  }
 }
 
 export function getDb(): DbHandle {

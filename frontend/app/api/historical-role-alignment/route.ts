@@ -41,6 +41,8 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as {
       year?: unknown;
       userid?: unknown;
+      startDate?: unknown;
+      endDate?: unknown;
       forcedRole?: unknown;
       forcedArea?: unknown;
       notes?: unknown;
@@ -49,6 +51,8 @@ export async function POST(request: NextRequest) {
     const result = saveHistoricalRoleAlignmentOverride({
       year: parseYear(String(body.year || "")),
       userid: typeof body.userid === "string" ? body.userid : "",
+      startDate: typeof body.startDate === "string" ? body.startDate : null,
+      endDate: typeof body.endDate === "string" ? body.endDate : null,
       forcedRole: typeof body.forcedRole === "string" ? body.forcedRole : null,
       forcedArea: typeof body.forcedArea === "string" ? body.forcedArea : null,
       notes: typeof body.notes === "string" ? body.notes : "",
