@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 type AlignmentRow = {
   year: number;
   userid: string;
+  subjectKey?: string | null;
+  overrideSubjectKey?: string | null;
   name: string | null;
   primaryRole: string | null;
   primaryRoleShare: number | null;
@@ -27,10 +29,30 @@ type AlignmentRow = {
   overrideStartDate?: string | null;
   overrideEndDate?: string | null;
   notes?: string | null;
+  rangeOverrides?: SavedRangeOverride[];
   effectiveRole?: string | null;
   effectiveArea?: string | null;
   alignmentStatus?: string | null;
+  coverageComplete?: boolean;
+  observedWeeks?: number;
+  coveredWeeks?: number;
+  uncoveredWeeks?: number;
+  reviewQueueReason?: string;
+  suggestedReviewExplanation?: string;
   suggestedReviewSegments?: SuggestedReviewSegment[];
+};
+
+type SavedRangeOverride = {
+  id: string;
+  year: number;
+  subjectKey: string;
+  startDate: string;
+  endDate: string;
+  forcedRole: string | null;
+  forcedArea: string | null;
+  notes: string;
+  source: string;
+  updatedAt: string;
 };
 
 type SuggestedReviewSegment = {
@@ -43,6 +65,12 @@ type SuggestedReviewSegment = {
   replenishmentPlates: number;
   segmentType: "stable" | "likely_shift" | "mixed" | "uncovered_gap" | "low_confidence";
   reason: string;
+  coverageState?: "uncovered" | "partially_covered" | "covered_by_override" | "covered_by_global_override";
+  appliedRole?: string | null;
+  appliedArea?: string | null;
+  appliedStartDate?: string | null;
+  appliedEndDate?: string | null;
+  appliedCoverageLabel?: string;
 };
 
 type ApiPayload = {
@@ -59,6 +87,7 @@ type OptionsPayload = {
 };
 
 type OverrideDraft = {
+  rangeId: string;
   startDate: string;
   endDate: string;
   forcedRole: string;
@@ -102,16 +131,32 @@ function confidenceClasses(value: string) {
 }
 
 function rowKey(row: AlignmentRow) {
-  return `${row.year}-${row.userid}`;
+  return `${row.year}-${row.subjectKey || row.userid}-${row.userid}`;
+}
+
+function overrideKey(row: AlignmentRow) {
+  return row.subjectKey || row.userid;
 }
 
 function draftFromRow(row: AlignmentRow): OverrideDraft {
   return {
+    rangeId: "",
     startDate: row.overrideStartDate || "",
     endDate: row.overrideEndDate || "",
     forcedRole: row.forcedRole || "",
     forcedArea: row.forcedArea || "",
     notes: row.notes || "",
+  };
+}
+
+function draftFromRange(range: SavedRangeOverride): OverrideDraft {
+  return {
+    rangeId: range.id,
+    startDate: range.startDate,
+    endDate: range.endDate,
+    forcedRole: range.forcedRole || "",
+    forcedArea: range.forcedArea || "",
+    notes: range.notes || "",
   };
 }
 
@@ -132,12 +177,52 @@ function alignmentStatus(row: AlignmentRow, draft?: OverrideDraft) {
 }
 
 function hasOverride(row: AlignmentRow) {
-  return Boolean(row.forcedRole || row.forcedArea || row.overrideStartDate || row.overrideEndDate || row.notes?.trim());
+  return Boolean(
+    row.forcedRole ||
+      row.forcedArea ||
+      row.overrideStartDate ||
+      row.overrideEndDate ||
+      row.notes?.trim() ||
+      (row.rangeOverrides?.length || 0) > 0
+  );
+}
+
+function hasGlobalOverride(row: AlignmentRow) {
+  return hasOverride(row) && !row.overrideStartDate && !row.overrideEndDate;
 }
 
 function needsReview(row: AlignmentRow) {
   const status = String(row.alignmentStatus || "").toLowerCase();
   return row.reviewFlag || status.includes("review");
+}
+
+function coverageComplete(row: AlignmentRow) {
+  return row.coverageComplete === true;
+}
+
+function isActiveReviewRow(row: AlignmentRow) {
+  return needsReview(row) && !coverageComplete(row) && !hasGlobalOverride(row);
+}
+
+function isProcessedRow(row: AlignmentRow) {
+  return coverageComplete(row) || !needsReview(row) || hasGlobalOverride(row);
+}
+
+function queueLabel(row: AlignmentRow) {
+  return isActiveReviewRow(row) ? "Active Review" : "Processed";
+}
+
+function queueReason(row: AlignmentRow) {
+  if (row.reviewQueueReason) return row.reviewQueueReason;
+  if (!needsReview(row)) return "No review flag is currently raised.";
+  if (coverageComplete(row)) return "All observed meaningful weeks are covered.";
+  if (hasGlobalOverride(row)) return "A global override covers the full review period.";
+  return "Review is still open because observed weeks remain uncovered.";
+}
+
+function coverageBadgeLabel(row: AlignmentRow) {
+  if (!needsReview(row)) return "No review needed";
+  return coverageComplete(row) ? "Coverage complete" : "Coverage incomplete";
 }
 
 function segmentTypeLabel(type: SuggestedReviewSegment["segmentType"]) {
@@ -169,6 +254,54 @@ function segmentTone(type: SuggestedReviewSegment["segmentType"]) {
     default:
       return "border-slate-200 bg-white hover:bg-slate-50";
   }
+}
+
+function segmentCoverageState(segment: SuggestedReviewSegment) {
+  return segment.coverageState || "uncovered";
+}
+
+function segmentCoverageLabel(segment: SuggestedReviewSegment) {
+  switch (segmentCoverageState(segment)) {
+    case "covered_by_global_override":
+      return "Global override";
+    case "covered_by_override":
+      return "Covered";
+    case "partially_covered":
+      return "Partial";
+    case "uncovered":
+    default:
+      return "Uncovered";
+  }
+}
+
+function segmentCoverageTone(segment: SuggestedReviewSegment) {
+  switch (segmentCoverageState(segment)) {
+    case "covered_by_global_override":
+    case "covered_by_override":
+      return "border-emerald-300 bg-emerald-50 text-emerald-800";
+    case "partially_covered":
+      return "border-amber-300 bg-amber-50 text-amber-800";
+    case "uncovered":
+    default:
+      return "border-slate-300 bg-white text-slate-700";
+  }
+}
+
+function segmentCardTone(segment: SuggestedReviewSegment) {
+  switch (segmentCoverageState(segment)) {
+    case "covered_by_global_override":
+    case "covered_by_override":
+      return "border-emerald-300 bg-emerald-50 hover:bg-emerald-100";
+    case "partially_covered":
+      return "border-amber-300 bg-amber-50 hover:bg-amber-100";
+    case "uncovered":
+    default:
+      return segmentTone(segment.segmentType);
+  }
+}
+
+function hasAppliedOverride(segment: SuggestedReviewSegment) {
+  return segmentCoverageState(segment) !== "uncovered";
 }
 
 export default function HistoricalRoleAlignmentPage() {
@@ -245,9 +378,11 @@ export default function HistoricalRoleAlignmentPage() {
         }
         return nextPayload.rows[0] ? rowKey(nextPayload.rows[0]) : null;
       });
+      return nextPayload;
     } catch (err) {
       setPayload(null);
       setError(err instanceof Error ? err.message : "Failed to load historical role alignment");
+      return null;
     } finally {
       setLoading(false);
     }
@@ -262,8 +397,8 @@ export default function HistoricalRoleAlignmentPage() {
     return {
       operators: rows.length,
       reviewFlags: rows.filter((row) => row.reviewFlag).length,
-      activeQueue: rows.filter((row) => needsReview(row) && !hasOverride(row)).length,
-      processed: rows.filter((row) => hasOverride(row)).length,
+      activeQueue: rows.filter(isActiveReviewRow).length,
+      processed: rows.filter(isProcessedRow).length,
       replPlates: rows.reduce((sum, row) => sum + row.yearlyReplPlates, 0),
       receivingPlates: rows.reduce((sum, row) => sum + row.yearlyReceivingPlates, 0),
       pickPlates: rows.reduce((sum, row) => sum + row.yearlyPickPlates, 0),
@@ -278,14 +413,17 @@ export default function HistoricalRoleAlignmentPage() {
 
   const selectedDraft = selectedRow ? drafts[rowKey(selectedRow)] : undefined;
   const selectedSegments = selectedRow?.suggestedReviewSegments || [];
+  const selectedSuggestionExplanation =
+    selectedRow?.suggestedReviewExplanation ||
+    "No suggested date-range segments were generated for this operator.";
 
   const activeRows = useMemo(
-    () => (payload?.rows || []).filter((row) => needsReview(row) && !hasOverride(row)),
+    () => (payload?.rows || []).filter(isActiveReviewRow),
     [payload]
   );
 
   const processedRows = useMemo(
-    () => (payload?.rows || []).filter((row) => hasOverride(row)),
+    () => (payload?.rows || []).filter(isProcessedRow),
     [payload]
   );
 
@@ -298,6 +436,8 @@ export default function HistoricalRoleAlignmentPage() {
     return baseRows.filter((row) =>
       [
         row.userid,
+        row.subjectKey,
+        row.overrideSubjectKey,
         row.name,
         row.primaryRole,
         row.primaryArea,
@@ -328,6 +468,7 @@ export default function HistoricalRoleAlignmentPage() {
       ...current,
       [key]: {
         ...(current[key] || {
+          rangeId: "",
           startDate: "",
           endDate: "",
           forcedRole: "",
@@ -348,7 +489,7 @@ export default function HistoricalRoleAlignmentPage() {
       return;
     }
 
-    setSavingUser(row.userid);
+    setSavingUser(rowKey(row));
     setError(null);
     setMessage(null);
     setEditorFeedback({
@@ -357,21 +498,24 @@ export default function HistoricalRoleAlignmentPage() {
     });
 
     try {
+      if (draft.rangeId && (!draft.startDate.trim() || !draft.endDate.trim())) {
+        throw new Error("Saved range overrides need both a start date and an end date.");
+      }
+
       const isClear =
         !draft.startDate.trim() &&
         !draft.endDate.trim() &&
         !draft.forcedRole.trim() &&
         !draft.forcedArea.trim() &&
         !draft.notes.trim();
-      const nextRow =
-        visibleRows.find((candidate) => rowKey(candidate) !== rowKey(row)) || null;
-
       const res = await fetch("/api/historical-role-alignment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           year: row.year,
           userid: row.userid,
+          subjectKey: overrideKey(row),
+          rangeId: draft.rangeId || null,
           startDate: draft.startDate || null,
           endDate: draft.endDate || null,
           forcedRole: draft.forcedRole || null,
@@ -380,7 +524,11 @@ export default function HistoricalRoleAlignmentPage() {
         }),
       });
 
-      const json = (await res.json().catch(() => ({}))) as { error?: string; details?: string };
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        details?: string;
+        rangeId?: string;
+      };
 
       if (!res.ok) {
         throw new Error(
@@ -392,13 +540,82 @@ export default function HistoricalRoleAlignmentPage() {
       setMessage(`${actionText} for ${row.name || row.userid}.`);
       setEditorFeedback({
         tone: "success",
-        text: `${actionText}. ${nextRow ? `Moved to ${nextRow.name || nextRow.userid}.` : "No more rows in this list."}`,
+        text: `${actionText}. Refreshed coverage and queue status.`,
       });
-      await loadRows(nextRow ? rowKey(nextRow) : null, true);
+      const refreshedPayload = await loadRows(rowKey(row), true);
+      const refreshedRow = refreshedPayload?.rows.find((candidate) => rowKey(candidate) === rowKey(row));
+      if (refreshedRow) {
+        setMode(isActiveReviewRow(refreshedRow) ? "active" : "processed");
+        if (json.rangeId) {
+          const refreshedRange = refreshedRow.rangeOverrides?.find((range) => range.id === json.rangeId);
+          if (refreshedRange) {
+            setDrafts((current) => ({
+              ...current,
+              [rowKey(refreshedRow)]: draftFromRange(refreshedRange),
+            }));
+          }
+        }
+      }
     } catch (err) {
       setEditorFeedback({
         tone: "error",
         text: err instanceof Error ? err.message : "Failed to save historical override",
+      });
+    } finally {
+      setSavingUser(null);
+    }
+  }
+
+  async function deleteRangeOverride(row: AlignmentRow, range: SavedRangeOverride) {
+    if (!saveSupported) {
+      setEditorFeedback({
+        tone: "error",
+        text: "Historical override save API is unavailable.",
+      });
+      return;
+    }
+
+    setSavingUser(rowKey(row));
+    setError(null);
+    setMessage(null);
+    setEditorFeedback({
+      tone: "info",
+      text: "Deleting range override...",
+    });
+
+    try {
+      const res = await fetch("/api/historical-role-alignment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          year: row.year,
+          userid: row.userid,
+          subjectKey: overrideKey(row),
+          deleteRangeId: range.id,
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string; details?: string };
+
+      if (!res.ok) {
+        throw new Error(
+          json.details || json.error || "Historical override save API is unavailable"
+        );
+      }
+
+      setMessage(`Deleted range override for ${row.name || row.userid}.`);
+      setEditorFeedback({
+        tone: "success",
+        text: "Deleted range override. Refreshed coverage and queue status.",
+      });
+      const refreshedPayload = await loadRows(rowKey(row), true);
+      const refreshedRow = refreshedPayload?.rows.find((candidate) => rowKey(candidate) === rowKey(row));
+      if (refreshedRow) {
+        setMode(isActiveReviewRow(refreshedRow) ? "active" : "processed");
+      }
+    } catch (err) {
+      setEditorFeedback({
+        tone: "error",
+        text: err instanceof Error ? err.message : "Failed to delete range override",
       });
     } finally {
       setSavingUser(null);
@@ -482,8 +699,8 @@ export default function HistoricalRoleAlignmentPage() {
                   </h2>
                   <p className="mt-1 text-xs text-slate-500">
                     {mode === "active"
-                      ? "Rows here still need review and have no saved override."
-                      : "Rows here already have a saved forced role, forced area, or note."}
+                      ? "Rows here still need review because observed meaningful weeks remain uncovered."
+                      : "Rows here are coverage-complete, globally overridden, or do not need review."}
                   </p>
                 </div>
 
@@ -578,7 +795,7 @@ export default function HistoricalRoleAlignmentPage() {
                       <td className="px-3 py-4 text-slate-500" colSpan={showDetails ? 15 : 8}>
                         {mode === "active"
                           ? "No active review rows match the current filters."
-                          : "No processed override rows match the current filters."}
+                          : "No processed rows match the current filters."}
                       </td>
                     </tr>
                   ) : null}
@@ -610,6 +827,11 @@ export default function HistoricalRoleAlignmentPage() {
                               <div className="text-xs font-normal text-slate-500">
                                 {row.userid}
                               </div>
+                              {row.subjectKey && row.subjectKey !== row.userid ? (
+                                <div className="text-[11px] font-normal text-slate-400">
+                                  Subject {row.subjectKey}
+                                </div>
+                              ) : null}
                             </td>
                             <td
                               className={[
@@ -652,18 +874,23 @@ export default function HistoricalRoleAlignmentPage() {
                               </span>
                             </td>
                             <td className="whitespace-nowrap px-3 py-2">
-                              <span
-                                className={[
-                                  "inline-flex rounded-full border px-2 py-0.5 text-xs font-medium",
-                                  hasOverride(row)
-                                    ? "border-blue-200 bg-blue-50 text-blue-800"
-                                    : row.reviewFlag
+                              <div className="space-y-1">
+                                <span
+                                  className={[
+                                    "inline-flex rounded-full border px-2 py-0.5 text-xs font-medium",
+                                    isActiveReviewRow(row)
                                       ? "border-amber-200 bg-amber-50 text-amber-800"
-                                      : "border-emerald-200 bg-emerald-50 text-emerald-800",
-                                ].join(" ")}
-                              >
-                                {alignmentStatus(row)}
-                              </span>
+                                      : hasOverride(row)
+                                        ? "border-blue-200 bg-blue-50 text-blue-800"
+                                        : "border-emerald-200 bg-emerald-50 text-emerald-800",
+                                  ].join(" ")}
+                                >
+                                  {queueLabel(row)}
+                                </span>
+                                <div className="text-xs text-slate-500">
+                                  {alignmentStatus(row)}
+                                </div>
+                              </div>
                             </td>
                             {showDetails ? (
                               <>
@@ -741,6 +968,15 @@ export default function HistoricalRoleAlignmentPage() {
                 <div>
                   <div className="text-lg font-semibold">{selectedRow.name || selectedRow.userid}</div>
                   <div className="text-xs text-slate-500">{selectedRow.userid}</div>
+                  {selectedRow.subjectKey && selectedRow.subjectKey !== selectedRow.userid ? (
+                    <div className="text-xs text-slate-500">Subject {selectedRow.subjectKey}</div>
+                  ) : null}
+                  {selectedRow.overrideSubjectKey &&
+                  selectedRow.overrideSubjectKey !== (selectedRow.subjectKey || selectedRow.userid) ? (
+                    <div className="text-xs text-amber-700">
+                      Loaded legacy override key {selectedRow.overrideSubjectKey}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 text-sm">
@@ -780,7 +1016,108 @@ export default function HistoricalRoleAlignmentPage() {
                   </div>
                 </div>
 
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-medium text-slate-500">Queue status</div>
+                      <div className="mt-1 font-semibold">{queueLabel(selectedRow)}</div>
+                    </div>
+                    <span
+                      className={[
+                        "rounded-full border px-2 py-0.5 text-xs font-medium",
+                        coverageComplete(selectedRow) || !needsReview(selectedRow)
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                          : "border-amber-200 bg-amber-50 text-amber-800",
+                      ].join(" ")}
+                    >
+                      {coverageBadgeLabel(selectedRow)}
+                    </span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <div className="text-slate-500">Observed weeks</div>
+                      <div className="mt-1 font-semibold text-slate-900">
+                        {formatNumber(selectedRow.observedWeeks ?? selectedRow.activeWeeks)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">Covered weeks</div>
+                      <div className="mt-1 font-semibold text-slate-900">
+                        {formatNumber(selectedRow.coveredWeeks)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">Uncovered weeks</div>
+                      <div className="mt-1 font-semibold text-slate-900">
+                        {formatNumber(selectedRow.uncoveredWeeks)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 text-xs text-slate-600">{queueReason(selectedRow)}</div>
+                </div>
+
                 <div className="grid grid-cols-1 gap-3">
+                  <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-sm font-semibold">Saved Range Overrides</h3>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Date-range overrides are saved independently for this operator.
+                        </p>
+                      </div>
+                      <span className="rounded-full border bg-white px-2 py-0.5 text-xs font-medium text-slate-600">
+                        {formatNumber(selectedRow.rangeOverrides?.length || 0)}
+                      </span>
+                    </div>
+
+                    {selectedRow.rangeOverrides?.length ? (
+                      <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
+                        {selectedRow.rangeOverrides.map((range) => {
+                          const selectedRange = selectedDraft.rangeId === range.id;
+                          return (
+                            <div
+                              key={range.id}
+                              className={[
+                                "rounded-md border bg-white p-2 text-xs",
+                                selectedRange ? "border-blue-300 ring-1 ring-blue-300" : "border-slate-200",
+                              ].join(" ")}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <button
+                                  className="min-w-0 text-left"
+                                  onClick={() => updateDraft(rowKey(selectedRow), draftFromRange(range))}
+                                  type="button"
+                                >
+                                  <div className="font-semibold text-slate-900">
+                                    {range.startDate} to {range.endDate}
+                                  </div>
+                                  <div className="mt-1 text-slate-600">
+                                    {range.forcedArea || "-"} / {range.forcedRole || "-"}
+                                  </div>
+                                  {range.notes ? (
+                                    <div className="mt-1 truncate text-slate-500">{range.notes}</div>
+                                  ) : null}
+                                </button>
+                                <button
+                                  className="shrink-0 rounded-md border border-red-200 px-2 py-1 font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                                  disabled={savingUser === rowKey(selectedRow)}
+                                  onClick={() => void deleteRangeOverride(selectedRow, range)}
+                                  type="button"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="rounded-md border border-dashed bg-white p-3 text-xs text-slate-500">
+                        No saved date-range overrides for this operator.
+                      </div>
+                    )}
+                  </div>
+
                   <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
                     <div className="flex items-start justify-between gap-2">
                       <div>
@@ -801,10 +1138,11 @@ export default function HistoricalRoleAlignmentPage() {
                             key={`${segment.startDate}-${segment.endDate}-${segment.suggestedArea || "area"}-${segment.suggestedRole || "role"}`}
                             className={[
                               "w-full rounded-md border p-2 text-left text-xs transition",
-                              segmentTone(segment.segmentType),
+                              segmentCardTone(segment),
                             ].join(" ")}
                             onClick={() =>
                               updateDraft(rowKey(selectedRow), {
+                                rangeId: "",
                                 startDate: segment.startDate,
                                 endDate: segment.endDate,
                                 forcedRole: segment.suggestedRole || "",
@@ -817,24 +1155,47 @@ export default function HistoricalRoleAlignmentPage() {
                               <div className="font-semibold text-slate-900">
                                 {segment.startDate} to {segment.endDate}
                               </div>
-                              <span className="shrink-0 rounded-full border bg-white px-2 py-0.5 font-medium text-slate-700">
-                                {segmentTypeLabel(segment.segmentType)}
-                              </span>
+                              <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                                <span className="rounded-full border bg-white px-2 py-0.5 font-medium text-slate-700">
+                                  {segmentTypeLabel(segment.segmentType)}
+                                </span>
+                                <span
+                                  className={[
+                                    "rounded-full border px-2 py-0.5 font-medium",
+                                    segmentCoverageTone(segment),
+                                  ].join(" ")}
+                                >
+                                  {segmentCoverageLabel(segment)}
+                                </span>
+                              </div>
                             </div>
                             <div className="mt-1 grid grid-cols-2 gap-2 text-slate-700">
                               <div>
-                                <span className="text-slate-500">Area: </span>
+                                <span className="text-slate-500">Inferred area: </span>
                                 <span className="font-medium">
                                   {segment.suggestedArea || "-"} ({formatPercent(segment.areaShare)})
                                 </span>
                               </div>
                               <div>
-                                <span className="text-slate-500">Role: </span>
+                                <span className="text-slate-500">Inferred role: </span>
                                 <span className="font-medium">
                                   {segment.suggestedRole || "-"} ({formatPercent(segment.roleShare)})
                                 </span>
                               </div>
                             </div>
+                            {hasAppliedOverride(segment) ? (
+                              <div className="mt-2 rounded-md border border-white/80 bg-white/70 p-2 text-slate-700">
+                                <div className="font-medium text-slate-900">
+                                  Applied: {segment.appliedArea || "-"} / {segment.appliedRole || "-"}
+                                </div>
+                                <div className="mt-1 text-slate-600">
+                                  {segment.appliedCoverageLabel ||
+                                    (segment.appliedStartDate && segment.appliedEndDate
+                                      ? `${segment.appliedStartDate} to ${segment.appliedEndDate}`
+                                      : "Saved override applies to this segment.")}
+                                </div>
+                              </div>
+                            ) : null}
                             <div className="mt-1 text-slate-600">
                               Plates: {formatNumber(segment.replenishmentPlates)}
                             </div>
@@ -844,7 +1205,7 @@ export default function HistoricalRoleAlignmentPage() {
                       </div>
                     ) : (
                       <div className="rounded-md border border-dashed bg-white p-3 text-xs text-slate-500">
-                        No monthly replenishment periods were available for this operator.
+                        {selectedSuggestionExplanation}
                       </div>
                     )}
                   </div>
@@ -924,34 +1285,68 @@ export default function HistoricalRoleAlignmentPage() {
                 </div>
 
                 <div className="grid grid-cols-1 gap-2">
+                  <div className="text-xs text-slate-500">
+                    {selectedDraft.rangeId
+                      ? "Editing saved date-range override."
+                      : selectedDraft.startDate || selectedDraft.endDate
+                        ? "Saving will add or update this date-range override."
+                        : "Saving without dates updates the global override."}
+                  </div>
                   <button
                     className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-                    disabled={savingUser === selectedRow.userid}
+                    disabled={savingUser === rowKey(selectedRow)}
                     onClick={() => void saveOverride(selectedRow, selectedDraft)}
                   >
-                    {savingUser === selectedRow.userid ? "Saving..." : "Save override"}
+                    {savingUser === rowKey(selectedRow)
+                      ? "Saving..."
+                      : selectedDraft.rangeId
+                        ? "Save range override"
+                        : selectedDraft.startDate || selectedDraft.endDate
+                          ? "Save new range override"
+                          : "Save global override"}
                   </button>
                   <button
                     className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:opacity-50"
-                    disabled={savingUser === selectedRow.userid}
+                    disabled={savingUser === rowKey(selectedRow)}
                     onClick={() => {
                       const cleared = {
+                        rangeId: "",
                         startDate: "",
                         endDate: "",
                         forcedRole: "",
                         forcedArea: "",
                         notes: "",
                       };
+                      if (selectedDraft.rangeId) {
+                        const range = selectedRow.rangeOverrides?.find(
+                          (candidate) => candidate.id === selectedDraft.rangeId
+                        );
+                        if (range) {
+                          void deleteRangeOverride(selectedRow, range);
+                          return;
+                        }
+                      }
+                      if (selectedDraft.startDate || selectedDraft.endDate) {
+                        updateDraft(rowKey(selectedRow), draftFromRow(selectedRow));
+                        return;
+                      }
                       updateDraft(rowKey(selectedRow), cleared);
                       void saveOverride(selectedRow, cleared);
                     }}
                   >
-                    {savingUser === selectedRow.userid ? "Clearing..." : "Clear override"}
+                    {savingUser === rowKey(selectedRow)
+                      ? "Clearing..."
+                      : selectedDraft.rangeId
+                        ? "Delete selected range"
+                        : selectedDraft.startDate || selectedDraft.endDate
+                          ? "Discard range draft"
+                          : "Clear global override"}
                   </button>
                   <button
                     className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
                     onClick={() =>
                       updateDraft(rowKey(selectedRow), {
+                        rangeId: "",
                         startDate: "",
                         endDate: "",
                         forcedRole: selectedRow.primaryRole || "",

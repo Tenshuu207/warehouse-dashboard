@@ -121,6 +121,22 @@ function ensureSchema(db: DbHandle) {
       updated_at TEXT NOT NULL,
       PRIMARY KEY (year, subject_key)
     );
+
+    CREATE TABLE IF NOT EXISTS historical_role_alignment_range_overrides (
+      id TEXT PRIMARY KEY,
+      year INTEGER NOT NULL,
+      subject_key TEXT NOT NULL,
+      start_date TEXT NOT NULL,
+      end_date TEXT NOT NULL,
+      forced_role TEXT,
+      forced_area TEXT,
+      notes TEXT NOT NULL DEFAULT '',
+      source TEXT NOT NULL DEFAULT 'manual',
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_historical_role_alignment_range_subject
+      ON historical_role_alignment_range_overrides (year, subject_key, start_date, end_date);
   `);
 
   const overrideColumns = db
@@ -134,6 +150,85 @@ function ensureSchema(db: DbHandle) {
 
   if (!overrideColumnNames.has("end_date")) {
     db.exec(`ALTER TABLE historical_role_alignment_overrides ADD COLUMN end_date TEXT`);
+  }
+
+  db.exec(`
+    INSERT OR IGNORE INTO historical_role_alignment_range_overrides (
+      id,
+      year,
+      subject_key,
+      start_date,
+      end_date,
+      forced_role,
+      forced_area,
+      notes,
+      source,
+      updated_at
+    )
+    SELECT
+      'legacy:' || year || ':' || subject_key || ':' ||
+        COALESCE(start_date, year || '-01-01') || ':' ||
+        COALESCE(end_date, year || '-12-31'),
+      year,
+      subject_key,
+      COALESCE(start_date, year || '-01-01'),
+      COALESCE(end_date, year || '-12-31'),
+      forced_role,
+      forced_area,
+      COALESCE(notes, ''),
+      'legacy-single-row',
+      updated_at
+    FROM historical_role_alignment_overrides
+    WHERE start_date IS NOT NULL OR end_date IS NOT NULL;
+
+    DELETE FROM historical_role_alignment_overrides
+    WHERE start_date IS NOT NULL OR end_date IS NOT NULL;
+  `);
+
+  const legacyRangeTable = db
+    .prepare(
+      `
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table'
+        AND name = 'historical_role_alignment_date_range_overrides'
+      `
+    )
+    .get() as { name: string } | undefined;
+
+  if (legacyRangeTable) {
+    db.exec(`
+      INSERT OR IGNORE INTO historical_role_alignment_range_overrides (
+        id,
+        year,
+        subject_key,
+        start_date,
+        end_date,
+        forced_role,
+        forced_area,
+        notes,
+        source,
+        updated_at
+      )
+      SELECT
+        'legacy-range:' || subject_key || ':' || source || ':' ||
+          start_date || ':' || end_date || ':' ||
+          COALESCE(forced_role, '') || ':' || COALESCE(forced_area, ''),
+        CAST(substr(start_date, 1, 4) AS INTEGER),
+        subject_key,
+        start_date,
+        end_date,
+        forced_role,
+        forced_area,
+        COALESCE(notes, ''),
+        source,
+        updated_at
+      FROM historical_role_alignment_date_range_overrides
+      WHERE start_date IS NOT NULL
+        AND end_date IS NOT NULL
+        AND start_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+        AND end_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]';
+    `);
   }
 }
 

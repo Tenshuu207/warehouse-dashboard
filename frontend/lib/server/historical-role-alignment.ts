@@ -1,6 +1,14 @@
-import { getDb, listSnapshotsInRange } from "@/lib/server/db";
+import fs from "fs";
+import path from "path";
+import { randomUUID } from "crypto";
+import { getDb, getJsonValue, listSnapshotsInRange } from "@/lib/server/db";
 
 type SegmentType = "stable" | "likely_shift" | "mixed" | "uncovered_gap" | "low_confidence";
+type SegmentCoverageState =
+  | "uncovered"
+  | "partially_covered"
+  | "covered_by_override"
+  | "covered_by_global_override";
 
 export type SuggestedReviewSegment = {
   startDate: string;
@@ -12,11 +20,32 @@ export type SuggestedReviewSegment = {
   replenishmentPlates: number;
   segmentType: SegmentType;
   reason: string;
+  coverageState: SegmentCoverageState;
+  appliedRole: string | null;
+  appliedArea: string | null;
+  appliedStartDate: string | null;
+  appliedEndDate: string | null;
+  appliedCoverageLabel: string;
+};
+
+export type SavedRangeOverride = {
+  id: string;
+  year: number;
+  subjectKey: string;
+  startDate: string;
+  endDate: string;
+  forcedRole: string | null;
+  forcedArea: string | null;
+  notes: string;
+  source: string;
+  updatedAt: string;
 };
 
 export type HistoricalRoleAlignmentRow = {
   year: number;
   userid: string;
+  subjectKey: string;
+  overrideSubjectKey: string | null;
   name: string | null;
   primaryRole: string | null;
   primaryRoleShare: number | null;
@@ -42,10 +71,17 @@ export type HistoricalRoleAlignmentRow = {
   overrideStartDate: string | null;
   overrideEndDate: string | null;
   notes: string;
+  rangeOverrides: SavedRangeOverride[];
   effectiveRole: string | null;
   effectiveArea: string | null;
   alignmentStatus: string;
   anomalyFlag: boolean;
+  coverageComplete: boolean;
+  observedWeeks: number;
+  coveredWeeks: number;
+  uncoveredWeeks: number;
+  reviewQueueReason: string;
+  suggestedReviewExplanation: string;
   suggestedReviewSegments: SuggestedReviewSegment[];
   updatedAt: string;
 };
@@ -73,17 +109,37 @@ type DbRow = {
   role_mix_json: string;
   area_mix_json: string;
   source_summary_json: string;
-  forced_role: string | null;
-  forced_area: string | null;
+  updated_at: string;
+};
+
+type DbGlobalOverrideRow = {
+  subject_key: string;
   start_date: string | null;
   end_date: string | null;
+  forced_role: string | null;
+  forced_area: string | null;
   override_notes: string | null;
+};
+
+type DbRangeOverrideRow = {
+  id: string;
+  year: number;
+  subject_key: string;
+  start_date: string;
+  end_date: string;
+  forced_role: string | null;
+  forced_area: string | null;
+  override_notes: string | null;
+  source: string;
   updated_at: string;
 };
 
 export type HistoricalRoleAlignmentOverrideInput = {
   year: number;
   userid: string;
+  subjectKey?: string | null;
+  rangeId?: string | null;
+  deleteRangeId?: string | null;
   startDate?: string | null;
   endDate?: string | null;
   forcedRole?: string | null;
@@ -108,9 +164,65 @@ type UserlsDailyPayload = {
   users?: UserlsDailyUser[];
 };
 
-type MonthlyPeriod = SuggestedReviewSegment & {
+type RfMapping = {
+  rfUsername?: string;
+  employeeId?: string;
+  effectiveStartDate?: string;
+  effectiveEndDate?: string;
+  active?: boolean;
+};
+
+type RfMappingsData = {
+  mappings?: RfMapping[];
+};
+
+type RawMonthlyPeriod = Omit<
+  SuggestedReviewSegment,
+  | "coverageState"
+  | "appliedRole"
+  | "appliedArea"
+  | "appliedStartDate"
+  | "appliedEndDate"
+  | "appliedCoverageLabel"
+> & {
   userid: string;
 };
+
+type CoverageSummary = {
+  observedWeekKeys: Set<string>;
+  firstObservedDate: string | null;
+  lastObservedDate: string | null;
+};
+
+type SuggestedReviewData = {
+  segmentsByUser: Map<string, SuggestedReviewSegment[]>;
+  coverageByUser: Map<string, CoverageSummary>;
+};
+
+type OverrideFields = Pick<
+  DbGlobalOverrideRow,
+  "start_date" | "end_date" | "forced_role" | "forced_area" | "override_notes"
+>;
+
+type OverrideContext = OverrideFields & {
+  primary_role: string | null;
+  primary_area: string | null;
+};
+
+function mapRangeOverride(row: DbRangeOverrideRow): SavedRangeOverride {
+  return {
+    id: row.id,
+    year: row.year,
+    subjectKey: row.subject_key,
+    startDate: row.start_date,
+    endDate: row.end_date,
+    forcedRole: normalizeOptionalString(row.forced_role),
+    forcedArea: normalizeOptionalString(row.forced_area),
+    notes: row.override_notes || "",
+    source: row.source,
+    updatedAt: row.updated_at,
+  };
+}
 
 function parseJson<T>(value: string, fallback: T): T {
   try {
@@ -122,22 +234,53 @@ function parseJson<T>(value: string, fallback: T): T {
 
 function mapRow(
   row: DbRow,
-  suggestedReviewSegments: SuggestedReviewSegment[]
+  subjectKey: string,
+  globalOverride: DbGlobalOverrideRow | undefined,
+  rangeOverrides: SavedRangeOverride[],
+  suggestedReviewSegments: SuggestedReviewSegment[],
+  coverage: CoverageSummary | undefined
 ): HistoricalRoleAlignmentRow {
-  const forcedRole = normalizeOptionalString(row.forced_role);
-  const forcedArea = normalizeOptionalString(row.forced_area);
-  const overrideStartDate = normalizeDate(row.start_date);
-  const overrideEndDate = normalizeDate(row.end_date);
-  const notes = row.override_notes || "";
+  const forcedRole = normalizeOptionalString(globalOverride?.forced_role);
+  const forcedArea = normalizeOptionalString(globalOverride?.forced_area);
+  const overrideStartDate = normalizeDate(globalOverride?.start_date);
+  const overrideEndDate = normalizeDate(globalOverride?.end_date);
+  const notes = globalOverride?.override_notes || "";
   const effectiveRole = forcedRole || row.primary_role;
   const effectiveArea = forcedArea || row.primary_area;
   const hasOverride = Boolean(
-    forcedRole || forcedArea || overrideStartDate || overrideEndDate || notes.trim()
+    forcedRole ||
+      forcedArea ||
+      overrideStartDate ||
+      overrideEndDate ||
+      notes.trim() ||
+      rangeOverrides.length > 0
   );
+  const observedWeekKeys = coverage?.observedWeekKeys || new Set<string>();
+  const observedWeeks = observedWeekKeys.size || row.active_weeks || 0;
+  const hasGlobalOverride = Boolean(globalOverride);
+  const coveredWeeks =
+    observedWeekKeys.size === 0 && hasGlobalOverride
+      ? observedWeeks
+      : countCoveredWeeks(observedWeekKeys, globalOverride, rangeOverrides);
+  const uncoveredWeeks = Math.max(observedWeeks - coveredWeeks, 0);
+  const coverageComplete = hasGlobalOverride || (observedWeeks > 0 && uncoveredWeeks === 0);
+  const reviewQueueReason = coverageComplete
+    ? hasGlobalOverride
+        ? "A global override covers the full review period."
+        : "All observed meaningful weeks are covered by the saved override."
+    : !row.review_flag
+      ? "No review flag is currently raised."
+      : rangeOverrides.length > 0
+        ? `${uncoveredWeeks} observed week${uncoveredWeeks === 1 ? "" : "s"} remain outside saved range overrides.`
+        : hasOverride
+        ? `${uncoveredWeeks} observed week${uncoveredWeeks === 1 ? "" : "s"} remain outside the saved override.`
+        : "Review is still open because no saved override covers the observed weeks.";
 
   return {
     year: row.year,
     userid: row.userid,
+    subjectKey,
+    overrideSubjectKey: globalOverride?.subject_key || null,
     name: row.name,
     primaryRole: row.primary_role,
     primaryRoleShare: row.primary_role_share,
@@ -163,10 +306,17 @@ function mapRow(
     overrideStartDate,
     overrideEndDate,
     notes,
+    rangeOverrides,
     effectiveRole,
     effectiveArea,
     alignmentStatus: hasOverride ? "Override saved" : row.review_flag === 1 ? "Needs review" : "Aligned",
     anomalyFlag: row.review_flag === 1,
+    coverageComplete,
+    observedWeeks,
+    coveredWeeks,
+    uncoveredWeeks,
+    reviewQueueReason,
+    suggestedReviewExplanation: buildSuggestionExplanation(row, suggestedReviewSegments, coverage),
     suggestedReviewSegments,
     updatedAt: row.updated_at,
   };
@@ -189,6 +339,11 @@ function normalizeNotes(value: unknown): string {
   return value.trim();
 }
 
+function normalizeRfUsername(value: unknown): string | null {
+  const trimmed = normalizeOptionalString(value);
+  return trimmed ? trimmed.toLowerCase() : null;
+}
+
 function asInt(value: unknown): number {
   const parsed = Number(value || 0);
   return Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
@@ -197,6 +352,81 @@ function asInt(value: unknown): number {
 function safeShare(numerator: number, denominator: number): number | null {
   if (denominator <= 0) return null;
   return Math.round((numerator / denominator) * 10000) / 10000;
+}
+
+function mappingsFilePath() {
+  return path.join(process.cwd(), "..", "ingest", "config", "rf_username_mappings.json");
+}
+
+function normalizeMappings(input: unknown): RfMapping[] {
+  const raw =
+    input && typeof input === "object" && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : {};
+  const mappings = Array.isArray(raw.mappings) ? raw.mappings : [];
+
+  const normalized: RfMapping[] = [];
+
+  for (const item of mappings) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const row = item as Record<string, unknown>;
+    const rfUsername = normalizeOptionalString(row.rfUsername);
+    const employeeId = normalizeOptionalString(row.employeeId);
+    if (!rfUsername || !employeeId) continue;
+
+    normalized.push({
+      rfUsername,
+      employeeId,
+      effectiveStartDate: normalizeDate(row.effectiveStartDate) || undefined,
+      effectiveEndDate: normalizeDate(row.effectiveEndDate) || undefined,
+      active: row.active === true,
+    });
+  }
+
+  return normalized;
+}
+
+function readRfMappings(): RfMapping[] {
+  const fromDb = getJsonValue<RfMappingsData>("config", "rf-mappings");
+  if (fromDb) return normalizeMappings(fromDb);
+
+  try {
+    return normalizeMappings(JSON.parse(fs.readFileSync(mappingsFilePath(), "utf-8")));
+  } catch {
+    return [];
+  }
+}
+
+function mappingOverlapsYear(mapping: RfMapping, year: number) {
+  const start = mapping.effectiveStartDate || `${year}-01-01`;
+  const end = mapping.effectiveEndDate || `${year}-12-31`;
+  return start <= `${year}-12-31` && end >= `${year}-01-01`;
+}
+
+function buildSubjectKeyResolver(year: number) {
+  const mappingsByRfUsername = new Map<string, RfMapping[]>();
+
+  for (const mapping of readRfMappings()) {
+    if (mapping.active !== true) continue;
+    const rfUsername = normalizeRfUsername(mapping.rfUsername);
+    if (!rfUsername || !mapping.employeeId || !mappingOverlapsYear(mapping, year)) continue;
+    const rows = mappingsByRfUsername.get(rfUsername) || [];
+    rows.push(mapping);
+    mappingsByRfUsername.set(rfUsername, rows);
+  }
+
+  for (const rows of mappingsByRfUsername.values()) {
+    rows.sort((left, right) =>
+      (right.effectiveStartDate || "").localeCompare(left.effectiveStartDate || "")
+    );
+  }
+
+  return (userid: string) => {
+    const rfUsername = normalizeRfUsername(userid);
+    if (!rfUsername) return userid;
+    const mapping = mappingsByRfUsername.get(rfUsername)?.[0];
+    return mapping?.employeeId ? `employee:${mapping.employeeId}` : userid;
+  };
 }
 
 function addBucket(buckets: Map<string, number>, label: unknown, plates: unknown) {
@@ -227,13 +457,24 @@ function nextDay(dateKey: string) {
   return parsed.toISOString().slice(0, 10);
 }
 
+function weekKey(dateKey: string) {
+  const parsed = new Date(`${dateKey}T00:00:00.000Z`);
+  const day = parsed.getUTCDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  parsed.setUTCDate(parsed.getUTCDate() + mondayOffset);
+  return parsed.toISOString().slice(0, 10);
+}
+
 function areAdjacent(left: SuggestedReviewSegment, right: SuggestedReviewSegment) {
   return nextDay(left.endDate) === right.startDate;
 }
 
 function classifyPeriod(
-  period: Omit<SuggestedReviewSegment, "segmentType" | "reason">,
-  previous: SuggestedReviewSegment | null
+  period: Pick<
+    SuggestedReviewSegment,
+    "startDate" | "endDate" | "suggestedArea" | "suggestedRole" | "areaShare" | "roleShare" | "replenishmentPlates"
+  >,
+  previous: Pick<SuggestedReviewSegment, "suggestedArea" | "suggestedRole"> | null
 ): Pick<SuggestedReviewSegment, "segmentType" | "reason"> {
   if (period.replenishmentPlates < 50) {
     return {
@@ -322,45 +563,165 @@ function mergeSegment(left: SuggestedReviewSegment, right: SuggestedReviewSegmen
   } satisfies SuggestedReviewSegment;
 }
 
-function overlapsOverride(
+function getSegmentOverrideCoverage(
   segment: SuggestedReviewSegment,
-  row: Pick<DbRow, "start_date" | "end_date" | "forced_role" | "forced_area" | "override_notes">
+  globalOverride: OverrideContext | null,
+  rangeOverrides: SavedRangeOverride[],
+  fallback: Pick<DbRow, "primary_role" | "primary_area">
 ) {
-  const hasOverride = Boolean(
-    normalizeOptionalString(row.forced_role) ||
-      normalizeOptionalString(row.forced_area) ||
-      normalizeDate(row.start_date) ||
-      normalizeDate(row.end_date) ||
-      normalizeOptionalString(row.override_notes)
-  );
-  if (!hasOverride) return false;
+  if (globalOverride) {
+    const appliedRole = normalizeOptionalString(globalOverride.forced_role) || fallback.primary_role || null;
+    const appliedArea = normalizeOptionalString(globalOverride.forced_area) || fallback.primary_area || null;
+    return {
+      coverageState: "covered_by_global_override" as const,
+      appliedRole,
+      appliedArea,
+      appliedStartDate: null,
+      appliedEndDate: null,
+      appliedCoverageLabel: "Covered by global override",
+    };
+  }
 
-  const startDate = normalizeDate(row.start_date);
-  const endDate = normalizeDate(row.end_date);
-  if (!startDate && !endDate) return true;
+  const overlapping = rangeOverrides
+    .filter((range) => range.startDate <= segment.endDate && range.endDate >= segment.startDate)
+    .sort((left, right) => left.startDate.localeCompare(right.startDate));
 
-  const effectiveStart = startDate || "0000-01-01";
-  const effectiveEnd = endDate || "9999-12-31";
-  return effectiveStart <= segment.endDate && effectiveEnd >= segment.startDate;
+  if (overlapping.length === 0) {
+    return {
+      coverageState: "uncovered" as const,
+      appliedRole: null,
+      appliedArea: null,
+      appliedStartDate: null,
+      appliedEndDate: null,
+      appliedCoverageLabel: "Uncovered",
+    };
+  }
+
+  const fullyCovered = rangesCoverPeriod(overlapping, segment.startDate, segment.endDate);
+  const displayRange =
+    overlapping.find((range) => range.startDate <= segment.startDate && range.endDate >= segment.endDate) ||
+    overlapping[0];
+  const appliedStartDate =
+    displayRange.startDate > segment.startDate ? displayRange.startDate : segment.startDate;
+  const appliedEndDate = displayRange.endDate < segment.endDate ? displayRange.endDate : segment.endDate;
+  const appliedRole = displayRange.forcedRole || fallback.primary_role || null;
+  const appliedArea = displayRange.forcedArea || fallback.primary_area || null;
+
+  return {
+    coverageState: fullyCovered ? ("covered_by_override" as const) : ("partially_covered" as const),
+    appliedRole,
+    appliedArea,
+    appliedStartDate,
+    appliedEndDate,
+    appliedCoverageLabel: fullyCovered
+      ? overlapping.length > 1
+        ? `Covered by ${overlapping.length} saved ranges`
+        : "Covered by saved range"
+      : overlapping.length > 1
+        ? `Partially covered by ${overlapping.length} saved ranges`
+        : `Partially covered ${appliedStartDate} to ${appliedEndDate}`,
+  };
+}
+
+function countCoveredWeeks(
+  observedWeekKeys: Set<string>,
+  globalOverride: OverrideFields | undefined,
+  rangeOverrides: SavedRangeOverride[]
+) {
+  if (observedWeekKeys.size === 0) return 0;
+  if (globalOverride) return observedWeekKeys.size;
+  if (rangeOverrides.length === 0) return 0;
+
+  let covered = 0;
+
+  for (const observedWeekKey of observedWeekKeys) {
+    const weekEnd = nextDay(nextDay(nextDay(nextDay(nextDay(nextDay(observedWeekKey))))));
+    if (rangeOverrides.some((range) => range.startDate <= weekEnd && range.endDate >= observedWeekKey)) {
+      covered += 1;
+    }
+  }
+
+  return covered;
+}
+
+function buildSuggestionExplanation(
+  row: DbRow,
+  suggestedReviewSegments: SuggestedReviewSegment[],
+  coverage: CoverageSummary | undefined
+) {
+  if (suggestedReviewSegments.length > 0) return "";
+
+  const observedWeeks = coverage?.observedWeekKeys.size || 0;
+  if (row.yearly_repl_plates <= 0 || observedWeeks === 0) {
+    return "No meaningful monthly replenishment periods were found in the daily snapshots.";
+  }
+
+  if (row.yearly_repl_plates < 50) {
+    return "Monthly replenishment volume is below the suggestion threshold.";
+  }
+
+  const roleShare = row.primary_role_share || 0;
+  const areaShare = row.primary_area_share || 0;
+  if (!row.primary_role || !row.primary_area) {
+    return "No strong dominant area or role was found for the observed replenishment work.";
+  }
+
+  if (roleShare < 0.55 || areaShare < 0.5) {
+    return "Meaningful months appear mixed or unclear, so no confident clickable segment was generated.";
+  }
+
+  return "Daily monthly snapshots did not produce date-specific suggested segments for this operator.";
 }
 
 function markUncoveredSegments(
   segments: SuggestedReviewSegment[],
-  row: Pick<DbRow, "start_date" | "end_date" | "forced_role" | "forced_area" | "override_notes">
+  globalOverride: OverrideContext | null,
+  rangeOverrides: SavedRangeOverride[],
+  fallback: Pick<DbRow, "primary_role" | "primary_area">
 ) {
   return segments.map((segment) => {
-    if (overlapsOverride(segment, row)) return segment;
-    if (segment.segmentType === "stable") return segment;
+    const coverage = getSegmentOverrideCoverage(segment, globalOverride, rangeOverrides, fallback);
+    const segmentWithCoverage = {
+      ...segment,
+      ...coverage,
+    };
+
+    if (coverage.coverageState !== "uncovered") return segmentWithCoverage;
+    if (segment.segmentType === "stable") return segmentWithCoverage;
 
     return {
-      ...segment,
+      ...segmentWithCoverage,
       segmentType: "uncovered_gap" as const,
       reason: `${segment.reason} No saved override covers this date range.`,
     };
   });
 }
 
-function buildSuggestedSegmentsByUser(year: number) {
+function rangesCoverPeriod(
+  ranges: Array<Pick<SavedRangeOverride, "startDate" | "endDate">>,
+  startDate: string,
+  endDate: string
+) {
+  let coveredThrough = "";
+
+  for (const range of ranges) {
+    if (range.endDate < startDate) continue;
+    if (range.startDate > endDate) break;
+
+    if (!coveredThrough) {
+      if (range.startDate > startDate) return false;
+      coveredThrough = range.endDate;
+      continue;
+    }
+
+    if (range.startDate > nextDay(coveredThrough)) return false;
+    if (range.endDate > coveredThrough) coveredThrough = range.endDate;
+  }
+
+  return Boolean(coveredThrough && coveredThrough >= endDate);
+}
+
+function buildSuggestedReviewData(year: number): SuggestedReviewData {
   const snapshots = listSnapshotsInRange<UserlsDailyPayload>(
     "userls_daily",
     `${year}-01-01`,
@@ -378,6 +739,7 @@ function buildSuggestedSegmentsByUser(year: number) {
       areaBuckets: Map<string, number>;
     }
   >();
+  const coverageByUser = new Map<string, CoverageSummary>();
 
   for (const snapshot of snapshots) {
     const monthKey = snapshot.dateKey.slice(0, 7);
@@ -387,6 +749,24 @@ function buildSuggestedSegmentsByUser(year: number) {
 
       const replPlates = asInt(user.replenishmentNoRecvPlates);
       if (replPlates <= 0) continue;
+
+      const coverage =
+        coverageByUser.get(userid) ||
+        {
+          observedWeekKeys: new Set<string>(),
+          firstObservedDate: null,
+          lastObservedDate: null,
+        };
+      coverage.observedWeekKeys.add(weekKey(snapshot.dateKey));
+      coverage.firstObservedDate =
+        !coverage.firstObservedDate || snapshot.dateKey < coverage.firstObservedDate
+          ? snapshot.dateKey
+          : coverage.firstObservedDate;
+      coverage.lastObservedDate =
+        !coverage.lastObservedDate || snapshot.dateKey > coverage.lastObservedDate
+          ? snapshot.dateKey
+          : coverage.lastObservedDate;
+      coverageByUser.set(userid, coverage);
 
       const periodKey = `${userid}:${monthKey}`;
       const period =
@@ -412,7 +792,7 @@ function buildSuggestedSegmentsByUser(year: number) {
     }
   }
 
-  const periodsByUser = new Map<string, MonthlyPeriod[]>();
+  const periodsByUser = new Map<string, RawMonthlyPeriod[]>();
   for (const period of periods.values()) {
     const role = chooseDominant(period.roleBuckets, period.replenishmentPlates);
     const area = chooseDominant(period.areaBuckets, period.replenishmentPlates);
@@ -453,6 +833,12 @@ function buildSuggestedSegmentsByUser(year: number) {
         replenishmentPlates: period.replenishmentPlates,
         segmentType: period.segmentType,
         reason: period.reason,
+        coverageState: "uncovered",
+        appliedRole: null,
+        appliedArea: null,
+        appliedStartDate: null,
+        appliedEndDate: null,
+        appliedCoverageLabel: "Uncovered",
       };
       const previous = segments[segments.length - 1];
       if (previous && canMergeSegments(previous, segment)) {
@@ -465,28 +851,24 @@ function buildSuggestedSegmentsByUser(year: number) {
     segmentsByUser.set(userid, segments);
   }
 
-  return segmentsByUser;
+  return {
+    segmentsByUser,
+    coverageByUser,
+  };
 }
 
 export function listHistoricalRoleAlignment(
   year: number
 ): HistoricalRoleAlignmentRow[] {
   const db = getDb();
-  const segmentsByUser = buildSuggestedSegmentsByUser(year);
+  const { segmentsByUser, coverageByUser } = buildSuggestedReviewData(year);
+  const resolveSubjectKey = buildSubjectKeyResolver(year);
   const rows = db
     .prepare(
       `
       SELECT
-        alignment.*,
-        overrides.start_date,
-        overrides.end_date,
-        overrides.forced_role,
-        overrides.forced_area,
-        overrides.notes AS override_notes
+        alignment.*
       FROM historical_role_alignment AS alignment
-      LEFT JOIN historical_role_alignment_overrides AS overrides
-        ON overrides.year = alignment.year
-       AND overrides.subject_key = alignment.userid
       WHERE alignment.year = ?
       ORDER BY
         alignment.review_flag DESC,
@@ -497,9 +879,93 @@ export function listHistoricalRoleAlignment(
     )
     .all(year) as DbRow[];
 
-  return rows.map((row) =>
-    mapRow(row, markUncoveredSegments(segmentsByUser.get(row.userid) || [], row))
+  const overrideRows = db
+    .prepare(
+      `
+      SELECT
+        subject_key,
+        start_date,
+        end_date,
+        forced_role,
+        forced_area,
+        notes AS override_notes
+      FROM historical_role_alignment_overrides
+      WHERE year = ?
+      `
+    )
+    .all(year) as DbGlobalOverrideRow[];
+  const overridesBySubjectKey = new Map(
+    overrideRows.map((overrideRow) => [overrideRow.subject_key, overrideRow])
   );
+  const rangeRows = db
+    .prepare(
+      `
+      SELECT
+        id,
+        year,
+        subject_key,
+        start_date,
+        end_date,
+        forced_role,
+        forced_area,
+        notes AS override_notes,
+        source,
+        updated_at
+      FROM historical_role_alignment_range_overrides
+      WHERE year = ?
+      ORDER BY start_date ASC, end_date ASC, updated_at ASC
+      `
+    )
+    .all(year) as DbRangeOverrideRow[];
+  const rangesBySubjectKey = new Map<string, SavedRangeOverride[]>();
+
+  for (const rangeRow of rangeRows) {
+    const mapped = mapRangeOverride(rangeRow);
+    const ranges = rangesBySubjectKey.get(mapped.subjectKey) || [];
+    ranges.push(mapped);
+    rangesBySubjectKey.set(mapped.subjectKey, ranges);
+  }
+
+  return rows.map((row) => {
+    const subjectKey = resolveSubjectKey(row.userid);
+    const globalOverride = overridesBySubjectKey.get(subjectKey) || overridesBySubjectKey.get(row.userid);
+    const canonicalRanges = rangesBySubjectKey.get(subjectKey) || [];
+    const legacyRanges = subjectKey !== row.userid ? rangesBySubjectKey.get(row.userid) || [] : [];
+    const rangeOverrides = [...canonicalRanges, ...legacyRanges].sort((left, right) =>
+      left.startDate.localeCompare(right.startDate) ||
+      left.endDate.localeCompare(right.endDate) ||
+      left.id.localeCompare(right.id)
+    );
+    const globalOverrideContext = globalOverride
+      ? {
+          start_date: globalOverride.start_date,
+          end_date: globalOverride.end_date,
+          forced_role: globalOverride.forced_role,
+          forced_area: globalOverride.forced_area,
+          override_notes: globalOverride.override_notes,
+          primary_role: row.primary_role,
+          primary_area: row.primary_area,
+        }
+      : null;
+    const fallback = {
+      primary_role: row.primary_role,
+      primary_area: row.primary_area,
+    };
+
+    return mapRow(
+      row,
+      subjectKey,
+      globalOverride,
+      rangeOverrides,
+      markUncoveredSegments(
+        segmentsByUser.get(row.userid) || [],
+        globalOverrideContext,
+        rangeOverrides,
+        fallback
+      ),
+      coverageByUser.get(row.userid)
+    );
+  });
 }
 
 export function saveHistoricalRoleAlignmentOverride(
@@ -507,6 +973,9 @@ export function saveHistoricalRoleAlignmentOverride(
 ) {
   const year = input.year;
   const userid = normalizeOptionalString(input.userid);
+  const inputSubjectKey = normalizeOptionalString(input.subjectKey);
+  const rangeId = normalizeOptionalString(input.rangeId);
+  const deleteRangeId = normalizeOptionalString(input.deleteRangeId);
   const startDate = normalizeDate(input.startDate);
   const endDate = normalizeDate(input.endDate);
   const forcedRole = normalizeOptionalString(input.forcedRole);
@@ -521,6 +990,9 @@ export function saveHistoricalRoleAlignmentOverride(
     throw new Error("Missing userid");
   }
 
+  const resolvedSubjectKey = buildSubjectKeyResolver(year)(userid);
+  const subjectKey = inputSubjectKey && inputSubjectKey === resolvedSubjectKey ? inputSubjectKey : resolvedSubjectKey;
+
   if ((input.startDate && !startDate) || (input.endDate && !endDate)) {
     throw new Error("Invalid override date range");
   }
@@ -530,23 +1002,135 @@ export function saveHistoricalRoleAlignmentOverride(
   }
 
   const db = getDb();
+  const updatedAt = new Date().toISOString();
+
+  if (deleteRangeId) {
+    const result = db.prepare(
+      `
+      DELETE FROM historical_role_alignment_range_overrides
+      WHERE id = ?
+        AND year = ?
+        AND subject_key IN (?, ?)
+      `
+    ).run(deleteRangeId, year, subjectKey, userid);
+
+    return {
+      status: result.changes > 0 ? "range_cleared" : "range_not_found",
+      year,
+      userid,
+      subjectKey,
+      rangeId: deleteRangeId,
+    };
+  }
+
+  if (startDate || endDate) {
+    const effectiveStartDate = startDate || `${year}-01-01`;
+    const effectiveEndDate = endDate || `${year}-12-31`;
+
+    if (effectiveStartDate > effectiveEndDate) {
+      throw new Error("Override start date must be before end date");
+    }
+
+    const existingRange = rangeId
+      ? (db
+          .prepare(
+            `
+            SELECT id
+            FROM historical_role_alignment_range_overrides
+            WHERE id = ?
+              AND year = ?
+              AND subject_key IN (?, ?)
+            `
+          )
+          .get(rangeId, year, subjectKey, userid) as { id: string } | undefined)
+      : (db
+          .prepare(
+            `
+            SELECT id
+            FROM historical_role_alignment_range_overrides
+            WHERE year = ?
+              AND subject_key = ?
+              AND start_date = ?
+              AND end_date = ?
+              AND source = 'manual'
+            ORDER BY updated_at DESC
+            LIMIT 1
+            `
+          )
+          .get(year, subjectKey, effectiveStartDate, effectiveEndDate) as
+          | { id: string }
+          | undefined);
+    const nextRangeId =
+      existingRange?.id || `manual:${year}:${subjectKey}:${randomUUID()}`;
+
+    db.prepare(
+      `
+      INSERT INTO historical_role_alignment_range_overrides (
+        id,
+        year,
+        subject_key,
+        start_date,
+        end_date,
+        forced_role,
+        forced_area,
+        notes,
+        source,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?)
+      ON CONFLICT(id) DO UPDATE SET
+        year = excluded.year,
+        subject_key = excluded.subject_key,
+        start_date = excluded.start_date,
+        end_date = excluded.end_date,
+        forced_role = excluded.forced_role,
+        forced_area = excluded.forced_area,
+        notes = excluded.notes,
+        source = excluded.source,
+        updated_at = excluded.updated_at
+      `
+    ).run(
+      nextRangeId,
+      year,
+      subjectKey,
+      effectiveStartDate,
+      effectiveEndDate,
+      forcedRole,
+      forcedArea,
+      notes,
+      updatedAt
+    );
+
+    return {
+      status: existingRange ? "range_updated" : "range_saved",
+      year,
+      userid,
+      subjectKey,
+      rangeId: nextRangeId,
+      startDate: effectiveStartDate,
+      endDate: effectiveEndDate,
+      forcedRole,
+      forcedArea,
+      notes,
+      updatedAt,
+    };
+  }
 
   if (!startDate && !endDate && !forcedRole && !forcedArea && !notes) {
     db.prepare(
       `
       DELETE FROM historical_role_alignment_overrides
-      WHERE year = ? AND subject_key = ?
+      WHERE year = ? AND subject_key IN (?, ?)
       `
-    ).run(year, userid);
+    ).run(year, subjectKey, userid);
 
     return {
       status: "cleared",
       year,
       userid,
+      subjectKey,
     };
   }
-
-  const updatedAt = new Date().toISOString();
 
   db.prepare(
     `
@@ -569,12 +1153,22 @@ export function saveHistoricalRoleAlignmentOverride(
       notes = excluded.notes,
       updated_at = excluded.updated_at
     `
-  ).run(year, userid, startDate, endDate, forcedRole, forcedArea, notes, updatedAt);
+  ).run(year, subjectKey, null, null, forcedRole, forcedArea, notes, updatedAt);
+
+  if (subjectKey !== userid) {
+    db.prepare(
+      `
+      DELETE FROM historical_role_alignment_overrides
+      WHERE year = ? AND subject_key = ?
+      `
+    ).run(year, userid);
+  }
 
   return {
     status: "saved",
     year,
     userid,
+    subjectKey,
     startDate,
     endDate,
     forcedRole,
