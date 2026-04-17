@@ -38,6 +38,7 @@ type AlignmentRow = {
   coveredWeeks?: number;
   uncoveredWeeks?: number;
   reviewQueueReason?: string;
+  rangeCoverageDiagnostics?: RangeCoverageDiagnostics;
   suggestedReviewExplanation?: string;
   suggestedReviewSegments?: SuggestedReviewSegment[];
 };
@@ -73,6 +74,31 @@ type SuggestedReviewSegment = {
   appliedCoverageLabel?: string;
 };
 
+type RangeCoverageDiagnostic = {
+  id: string;
+  source: string;
+  sourceLabel: string;
+  startDate: string;
+  endDate: string;
+  coveredWeeks: number;
+  overlapsObservedWeeks: boolean;
+  countsTowardCoverage: boolean;
+};
+
+type RangeCoverageDiagnostics = {
+  savedRangesExist: boolean;
+  savedRangeCount: number;
+  manualUiRangeCount: number;
+  legacyOrImportedRangeCount: number;
+  observedCoverageWeeksAvailable: boolean;
+  observedWeekCount: number;
+  coveredBySavedRanges: number;
+  rangesCountTowardCoverage: boolean;
+  rangesPartiallyCoverObservedWeeks: boolean;
+  message: string;
+  ranges: RangeCoverageDiagnostic[];
+};
+
 type ApiPayload = {
   year: number;
   count: number;
@@ -96,6 +122,13 @@ type OverrideDraft = {
 };
 
 type ReviewMode = "active" | "processed";
+type CoverageCause =
+  | "all"
+  | "covered_global"
+  | "covered_ranges"
+  | "partially_covered"
+  | "no_saved_ranges"
+  | "no_observed_week_keys";
 
 type EditorFeedback = {
   tone: "success" | "error" | "info";
@@ -188,7 +221,13 @@ function hasOverride(row: AlignmentRow) {
 }
 
 function hasGlobalOverride(row: AlignmentRow) {
-  return hasOverride(row) && !row.overrideStartDate && !row.overrideEndDate;
+  const hasRowLevelOverride = Boolean(
+    row.overrideSubjectKey ||
+      row.forcedRole ||
+      row.forcedArea ||
+      row.notes?.trim()
+  );
+  return hasRowLevelOverride && !row.overrideStartDate && !row.overrideEndDate;
 }
 
 function needsReview(row: AlignmentRow) {
@@ -223,6 +262,69 @@ function queueReason(row: AlignmentRow) {
 function coverageBadgeLabel(row: AlignmentRow) {
   if (!needsReview(row)) return "No review needed";
   return coverageComplete(row) ? "Coverage complete" : "Coverage incomplete";
+}
+
+function observedWeekKeysAvailable(row: AlignmentRow) {
+  if (row.rangeCoverageDiagnostics) {
+    return row.rangeCoverageDiagnostics.observedCoverageWeeksAvailable === true;
+  }
+  return (row.observedWeeks || 0) > 0;
+}
+
+function savedRangesExist(row: AlignmentRow) {
+  return row.rangeCoverageDiagnostics?.savedRangesExist === true || (row.rangeOverrides?.length || 0) > 0;
+}
+
+function savedRangesCountForZeroCoverage(row: AlignmentRow) {
+  const diagnostics = row.rangeCoverageDiagnostics;
+  if (!savedRangesExist(row)) return false;
+  if (!diagnostics) return (row.coveredWeeks || 0) === 0;
+  return diagnostics.coveredBySavedRanges === 0 || !diagnostics.rangesCountTowardCoverage;
+}
+
+function coverageCause(row: AlignmentRow): Exclude<CoverageCause, "all"> {
+  if (hasGlobalOverride(row)) return "covered_global";
+  if (!observedWeekKeysAvailable(row)) return "no_observed_week_keys";
+  if (coverageComplete(row) && (row.coveredWeeks || 0) > 0) return "covered_ranges";
+  if ((row.coveredWeeks || 0) > 0 || row.rangeCoverageDiagnostics?.rangesPartiallyCoverObservedWeeks) {
+    return "partially_covered";
+  }
+  return "no_saved_ranges";
+}
+
+function coverageCauseLabel(cause: CoverageCause) {
+  switch (cause) {
+    case "covered_global":
+      return "Covered by global override";
+    case "covered_ranges":
+      return "Covered by saved ranges";
+    case "partially_covered":
+      return "Partially covered";
+    case "no_observed_week_keys":
+      return "No observed week keys";
+    case "no_saved_ranges":
+      return "No saved ranges";
+    case "all":
+    default:
+      return "All coverage causes";
+  }
+}
+
+function coverageCauseTone(cause: CoverageCause) {
+  switch (cause) {
+    case "covered_global":
+    case "covered_ranges":
+      return "border-emerald-200 bg-emerald-50 text-emerald-800";
+    case "partially_covered":
+      return "border-amber-200 bg-amber-50 text-amber-800";
+    case "no_observed_week_keys":
+      return "border-sky-200 bg-sky-50 text-sky-800";
+    case "no_saved_ranges":
+      return "border-slate-300 bg-white text-slate-700";
+    case "all":
+    default:
+      return "border-slate-200 bg-slate-50 text-slate-700";
+  }
 }
 
 function segmentTypeLabel(type: SuggestedReviewSegment["segmentType"]) {
@@ -304,6 +406,23 @@ function hasAppliedOverride(segment: SuggestedReviewSegment) {
   return segmentCoverageState(segment) !== "uncovered";
 }
 
+function segmentUsesMultipleRanges(segment: SuggestedReviewSegment) {
+  return (
+    segmentCoverageState(segment) !== "covered_by_global_override" &&
+    /\b\d+ saved ranges\b/.test(segment.appliedCoverageLabel || "")
+  );
+}
+
+function rangeSourceLabel(source: string) {
+  if (source === "manual_ui") return "manual_ui";
+  if (source === "legacy/imported") return "legacy/imported";
+  return source || "imported";
+}
+
+function rangeCountLabel(count: number) {
+  return `${formatNumber(count)} week${count === 1 ? "" : "s"}`;
+}
+
 export default function HistoricalRoleAlignmentPage() {
   const [year, setYear] = useState("2025");
   const [payload, setPayload] = useState<ApiPayload | null>(null);
@@ -315,6 +434,7 @@ export default function HistoricalRoleAlignmentPage() {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, OverrideDraft>>({});
   const [mode, setMode] = useState<ReviewMode>("active");
+  const [coverageCauseFilter, setCoverageCauseFilter] = useState<CoverageCause>("all");
   const [search, setSearch] = useState("");
   const [showDetails, setShowDetails] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -413,6 +533,7 @@ export default function HistoricalRoleAlignmentPage() {
 
   const selectedDraft = selectedRow ? drafts[rowKey(selectedRow)] : undefined;
   const selectedSegments = selectedRow?.suggestedReviewSegments || [];
+  const selectedRangeDiagnostics = selectedRow?.rangeCoverageDiagnostics;
   const selectedSuggestionExplanation =
     selectedRow?.suggestedReviewExplanation ||
     "No suggested date-range segments were generated for this operator.";
@@ -429,11 +550,33 @@ export default function HistoricalRoleAlignmentPage() {
 
   const baseRows = mode === "active" ? activeRows : processedRows;
 
+  const coverageCauseCounts = useMemo(() => {
+    const counts: Record<CoverageCause, number> = {
+      all: baseRows.length,
+      covered_global: 0,
+      covered_ranges: 0,
+      partially_covered: 0,
+      no_saved_ranges: 0,
+      no_observed_week_keys: 0,
+    };
+
+    for (const row of baseRows) {
+      counts[coverageCause(row)] += 1;
+    }
+
+    return counts;
+  }, [baseRows]);
+
   const visibleRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return baseRows;
+    const causeFilteredRows =
+      coverageCauseFilter === "all"
+        ? baseRows
+        : baseRows.filter((row) => coverageCause(row) === coverageCauseFilter);
 
-    return baseRows.filter((row) =>
+    if (!q) return causeFilteredRows;
+
+    return causeFilteredRows.filter((row) =>
       [
         row.userid,
         row.subjectKey,
@@ -450,7 +593,7 @@ export default function HistoricalRoleAlignmentPage() {
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q))
     );
-  }, [baseRows, search]);
+  }, [baseRows, coverageCauseFilter, search]);
 
   useEffect(() => {
     if (loading) return;
@@ -729,6 +872,29 @@ export default function HistoricalRoleAlignmentPage() {
                   >
                     Processed / Overridden ({formatNumber(processedRows.length)})
                   </button>
+                  <label className="flex items-center gap-2 text-sm">
+                    <span className="text-xs font-medium text-slate-500">Cause</span>
+                    <select
+                      className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+                      value={coverageCauseFilter}
+                      onChange={(event) => setCoverageCauseFilter(event.target.value as CoverageCause)}
+                    >
+                      {(
+                        [
+                          "all",
+                          "covered_global",
+                          "covered_ranges",
+                          "partially_covered",
+                          "no_saved_ranges",
+                          "no_observed_week_keys",
+                        ] as CoverageCause[]
+                      ).map((cause) => (
+                        <option key={cause} value={cause}>
+                          {coverageCauseLabel(cause)} ({formatNumber(coverageCauseCounts[cause])})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
               </div>
 
@@ -749,7 +915,7 @@ export default function HistoricalRoleAlignmentPage() {
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className={`${showDetails ? "min-w-[1280px]" : "min-w-[860px]"} text-left text-sm`}>
+              <table className={`${showDetails ? "min-w-[1420px]" : "min-w-[980px]"} text-left text-sm`}>
                 <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="sticky left-0 z-30 w-56 whitespace-nowrap border-r bg-slate-50 px-3 py-2">
@@ -768,6 +934,7 @@ export default function HistoricalRoleAlignmentPage() {
                     <th className="whitespace-nowrap px-3 py-2">Area Share</th>
                     <th className="whitespace-nowrap px-3 py-2">Anomaly</th>
                     <th className="whitespace-nowrap px-3 py-2">Status</th>
+                    <th className="whitespace-nowrap px-3 py-2">Coverage Cause</th>
                     {showDetails ? (
                       <>
                         <th className="whitespace-nowrap px-3 py-2">UserID</th>
@@ -784,7 +951,7 @@ export default function HistoricalRoleAlignmentPage() {
                 <tbody className="divide-y">
                   {loading ? (
                     <tr>
-                      <td className="px-3 py-4 text-slate-500" colSpan={showDetails ? 15 : 8}>
+                      <td className="px-3 py-4 text-slate-500" colSpan={showDetails ? 16 : 9}>
                         Loading alignment rows...
                       </td>
                     </tr>
@@ -792,7 +959,7 @@ export default function HistoricalRoleAlignmentPage() {
 
                   {!loading && visibleRows.length === 0 ? (
                     <tr>
-                      <td className="px-3 py-4 text-slate-500" colSpan={showDetails ? 15 : 8}>
+                      <td className="px-3 py-4 text-slate-500" colSpan={showDetails ? 16 : 9}>
                         {mode === "active"
                           ? "No active review rows match the current filters."
                           : "No processed rows match the current filters."}
@@ -805,6 +972,7 @@ export default function HistoricalRoleAlignmentPage() {
                         const key = rowKey(row);
                         const selected = key === selectedKey;
                         const stickyBg = selected ? "bg-blue-50" : "bg-white";
+                        const rowCoverageCause = coverageCause(row);
 
                         return (
                           <tr
@@ -891,6 +1059,16 @@ export default function HistoricalRoleAlignmentPage() {
                                   {alignmentStatus(row)}
                                 </div>
                               </div>
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2">
+                              <span
+                                className={[
+                                  "inline-flex rounded-full border px-2 py-0.5 text-xs font-medium",
+                                  coverageCauseTone(rowCoverageCause),
+                                ].join(" ")}
+                              >
+                                {coverageCauseLabel(rowCoverageCause)}
+                              </span>
                             </td>
                             {showDetails ? (
                               <>
@@ -1022,16 +1200,26 @@ export default function HistoricalRoleAlignmentPage() {
                       <div className="text-xs font-medium text-slate-500">Queue status</div>
                       <div className="mt-1 font-semibold">{queueLabel(selectedRow)}</div>
                     </div>
-                    <span
-                      className={[
-                        "rounded-full border px-2 py-0.5 text-xs font-medium",
-                        coverageComplete(selectedRow) || !needsReview(selectedRow)
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                          : "border-amber-200 bg-amber-50 text-amber-800",
-                      ].join(" ")}
-                    >
-                      {coverageBadgeLabel(selectedRow)}
-                    </span>
+                    <div className="flex flex-col items-end gap-1">
+                      <span
+                        className={[
+                          "rounded-full border px-2 py-0.5 text-xs font-medium",
+                          coverageCauseTone(coverageCause(selectedRow)),
+                        ].join(" ")}
+                      >
+                        {coverageCauseLabel(coverageCause(selectedRow))}
+                      </span>
+                      <span
+                        className={[
+                          "rounded-full border px-2 py-0.5 text-xs font-medium",
+                          coverageComplete(selectedRow) || !needsReview(selectedRow)
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                            : "border-amber-200 bg-amber-50 text-amber-800",
+                        ].join(" ")}
+                      >
+                        {coverageBadgeLabel(selectedRow)}
+                      </span>
+                    </div>
                   </div>
                   <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
                     <div>
@@ -1053,8 +1241,107 @@ export default function HistoricalRoleAlignmentPage() {
                       </div>
                     </div>
                   </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <div className="text-slate-500">Observed week keys available</div>
+                      <div className="mt-1 font-semibold text-slate-900">
+                        {observedWeekKeysAvailable(selectedRow) ? "Yes" : "No"}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">Saved ranges count for 0 coverage</div>
+                      <div className="mt-1 font-semibold text-slate-900">
+                        {savedRangesCountForZeroCoverage(selectedRow) ? "Yes" : "No"}
+                      </div>
+                    </div>
+                  </div>
                   <div className="mt-3 text-xs text-slate-600">{queueReason(selectedRow)}</div>
                 </div>
+
+                {selectedRangeDiagnostics ? (
+                  <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold">Coverage Diagnostics</h3>
+                        <p className="mt-1 text-xs text-slate-600">
+                          {selectedRangeDiagnostics.message}
+                        </p>
+                      </div>
+                      <span
+                        className={[
+                          "rounded-full border px-2 py-0.5 text-xs font-medium",
+                          selectedRangeDiagnostics.rangesCountTowardCoverage
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                            : selectedRangeDiagnostics.savedRangesExist
+                              ? "border-amber-200 bg-amber-50 text-amber-800"
+                              : "border-slate-200 bg-slate-50 text-slate-600",
+                        ].join(" ")}
+                      >
+                        {selectedRangeDiagnostics.rangesCountTowardCoverage
+                          ? "Ranges count"
+                          : selectedRangeDiagnostics.savedRangesExist
+                            ? "No range coverage"
+                            : "No ranges"}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <div className="text-slate-500">Saved ranges</div>
+                        <div className="mt-1 font-semibold text-slate-900">
+                          {formatNumber(selectedRangeDiagnostics.savedRangeCount)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-slate-500">Observed week keys</div>
+                        <div className="mt-1 font-semibold text-slate-900">
+                          {selectedRangeDiagnostics.observedCoverageWeeksAvailable
+                            ? formatNumber(selectedRangeDiagnostics.observedWeekCount)
+                            : "Not found"}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-slate-500">manual_ui ranges</div>
+                        <div className="mt-1 font-semibold text-slate-900">
+                          {formatNumber(selectedRangeDiagnostics.manualUiRangeCount)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-slate-500">legacy/imported ranges</div>
+                        <div className="mt-1 font-semibold text-slate-900">
+                          {formatNumber(selectedRangeDiagnostics.legacyOrImportedRangeCount)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {selectedRangeDiagnostics.savedRangesExist ? (
+                      <div className="mt-3 space-y-1 text-xs">
+                        {selectedRangeDiagnostics.ranges.map((range) => (
+                          <div
+                            key={range.id}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1"
+                          >
+                            <span className="font-medium text-slate-800">
+                              {range.startDate} to {range.endDate}
+                            </span>
+                            <span className="text-slate-600">
+                              {rangeSourceLabel(range.sourceLabel)} ·{" "}
+                              {range.overlapsObservedWeeks
+                                ? `${rangeCountLabel(range.coveredWeeks)} covered`
+                                : "does not overlap observed weeks"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {selectedSegments.length === 0 ? (
+                      <div className="mt-3 rounded-md border border-dashed bg-slate-50 p-2 text-xs text-slate-600">
+                        {selectedSuggestionExplanation}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <div className="grid grid-cols-1 gap-3">
                   <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -1194,6 +1481,11 @@ export default function HistoricalRoleAlignmentPage() {
                                       ? `${segment.appliedStartDate} to ${segment.appliedEndDate}`
                                       : "Saved override applies to this segment.")}
                                 </div>
+                                {segmentUsesMultipleRanges(segment) ? (
+                                  <div className="mt-1 text-slate-500">
+                                    Applied values may vary across saved ranges.
+                                  </div>
+                                ) : null}
                               </div>
                             ) : null}
                             <div className="mt-1 text-slate-600">

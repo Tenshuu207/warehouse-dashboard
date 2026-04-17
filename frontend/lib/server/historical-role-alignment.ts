@@ -41,6 +41,31 @@ export type SavedRangeOverride = {
   updatedAt: string;
 };
 
+export type RangeCoverageDiagnostic = {
+  id: string;
+  source: string;
+  sourceLabel: string;
+  startDate: string;
+  endDate: string;
+  coveredWeeks: number;
+  overlapsObservedWeeks: boolean;
+  countsTowardCoverage: boolean;
+};
+
+export type RangeCoverageDiagnostics = {
+  savedRangesExist: boolean;
+  savedRangeCount: number;
+  manualUiRangeCount: number;
+  legacyOrImportedRangeCount: number;
+  observedCoverageWeeksAvailable: boolean;
+  observedWeekCount: number;
+  coveredBySavedRanges: number;
+  rangesCountTowardCoverage: boolean;
+  rangesPartiallyCoverObservedWeeks: boolean;
+  message: string;
+  ranges: RangeCoverageDiagnostic[];
+};
+
 export type HistoricalRoleAlignmentRow = {
   year: number;
   userid: string;
@@ -81,6 +106,7 @@ export type HistoricalRoleAlignmentRow = {
   coveredWeeks: number;
   uncoveredWeeks: number;
   reviewQueueReason: string;
+  rangeCoverageDiagnostics: RangeCoverageDiagnostics;
   suggestedReviewExplanation: string;
   suggestedReviewSegments: SuggestedReviewSegment[];
   updatedAt: string;
@@ -185,7 +211,7 @@ type RawMonthlyPeriod = Omit<
   | "appliedEndDate"
   | "appliedCoverageLabel"
 > & {
-  userid: string;
+  subjectKey: string;
 };
 
 type CoverageSummary = {
@@ -195,8 +221,8 @@ type CoverageSummary = {
 };
 
 type SuggestedReviewData = {
-  segmentsByUser: Map<string, SuggestedReviewSegment[]>;
-  coverageByUser: Map<string, CoverageSummary>;
+  segmentsBySubjectKey: Map<string, SuggestedReviewSegment[]>;
+  coverageBySubjectKey: Map<string, CoverageSummary>;
 };
 
 type OverrideFields = Pick<
@@ -262,7 +288,9 @@ function mapRow(
     observedWeekKeys.size === 0 && hasGlobalOverride
       ? observedWeeks
       : countCoveredWeeks(observedWeekKeys, globalOverride, rangeOverrides);
+  const rangeCoveredWeeks = countCoveredWeeks(observedWeekKeys, undefined, rangeOverrides);
   const uncoveredWeeks = Math.max(observedWeeks - coveredWeeks, 0);
+  const rangeUncoveredWeeks = Math.max(observedWeeks - rangeCoveredWeeks, 0);
   const coverageComplete = hasGlobalOverride || (observedWeeks > 0 && uncoveredWeeks === 0);
   const reviewQueueReason = coverageComplete
     ? hasGlobalOverride
@@ -316,6 +344,13 @@ function mapRow(
     coveredWeeks,
     uncoveredWeeks,
     reviewQueueReason,
+    rangeCoverageDiagnostics: buildRangeCoverageDiagnostics(
+      rangeOverrides,
+      observedWeekKeys,
+      observedWeeks,
+      rangeCoveredWeeks,
+      rangeUncoveredWeeks
+    ),
     suggestedReviewExplanation: buildSuggestionExplanation(row, suggestedReviewSegments, coverage),
     suggestedReviewSegments,
     updatedAt: row.updated_at,
@@ -623,6 +658,91 @@ function getSegmentOverrideCoverage(
   };
 }
 
+function weekEndDate(observedWeekKey: string) {
+  return nextDay(nextDay(nextDay(nextDay(nextDay(nextDay(observedWeekKey))))));
+}
+
+function rangeOverlapsObservedWeek(
+  range: Pick<SavedRangeOverride, "startDate" | "endDate">,
+  observedWeekKey: string
+) {
+  return range.startDate <= weekEndDate(observedWeekKey) && range.endDate >= observedWeekKey;
+}
+
+function countWeeksCoveredByRange(
+  observedWeekKeys: Set<string>,
+  range: Pick<SavedRangeOverride, "startDate" | "endDate">
+) {
+  let covered = 0;
+
+  for (const observedWeekKey of observedWeekKeys) {
+    if (rangeOverlapsObservedWeek(range, observedWeekKey)) {
+      covered += 1;
+    }
+  }
+
+  return covered;
+}
+
+function sourceLabel(source: string) {
+  if (source === "manual") return "manual_ui";
+  if (source.startsWith("legacy")) return "legacy/imported";
+  return source || "imported";
+}
+
+function buildRangeCoverageDiagnostics(
+  rangeOverrides: SavedRangeOverride[],
+  observedWeekKeys: Set<string>,
+  observedWeeks: number,
+  coveredWeeks: number,
+  uncoveredWeeks: number
+): RangeCoverageDiagnostics {
+  const ranges = rangeOverrides.map((range) => {
+    const rangeCoveredWeeks = countWeeksCoveredByRange(observedWeekKeys, range);
+
+    return {
+      id: range.id,
+      source: range.source,
+      sourceLabel: sourceLabel(range.source),
+      startDate: range.startDate,
+      endDate: range.endDate,
+      coveredWeeks: rangeCoveredWeeks,
+      overlapsObservedWeeks: rangeCoveredWeeks > 0,
+      countsTowardCoverage: rangeCoveredWeeks > 0,
+    };
+  });
+  const savedRangeCount = rangeOverrides.length;
+  const manualUiRangeCount = ranges.filter((range) => range.sourceLabel === "manual_ui").length;
+  const legacyOrImportedRangeCount = savedRangeCount - manualUiRangeCount;
+  const observedCoverageWeeksAvailable = observedWeekKeys.size > 0;
+  const rangesCountTowardCoverage = ranges.some((range) => range.countsTowardCoverage);
+  const rangesPartiallyCoverObservedWeeks = coveredWeeks > 0 && uncoveredWeeks > 0;
+  const message =
+    savedRangeCount === 0
+      ? "No saved date-range overrides exist for this operator."
+      : !observedCoverageWeeksAvailable
+        ? "Saved ranges exist, but daily observed week keys were not found for this coverage check."
+        : !rangesCountTowardCoverage
+          ? "Saved ranges exist, but none overlap the observed weeks used for coverage."
+          : rangesPartiallyCoverObservedWeeks
+            ? `${coveredWeeks} observed week${coveredWeeks === 1 ? "" : "s"} are covered by saved ranges, but ${uncoveredWeeks} remain outside them.`
+            : "Saved ranges overlap all observed weeks used for coverage.";
+
+  return {
+    savedRangesExist: savedRangeCount > 0,
+    savedRangeCount,
+    manualUiRangeCount,
+    legacyOrImportedRangeCount,
+    observedCoverageWeeksAvailable,
+    observedWeekCount: observedWeekKeys.size || observedWeeks,
+    coveredBySavedRanges: coveredWeeks,
+    rangesCountTowardCoverage,
+    rangesPartiallyCoverObservedWeeks,
+    message,
+    ranges,
+  };
+}
+
 function countCoveredWeeks(
   observedWeekKeys: Set<string>,
   globalOverride: OverrideFields | undefined,
@@ -635,8 +755,7 @@ function countCoveredWeeks(
   let covered = 0;
 
   for (const observedWeekKey of observedWeekKeys) {
-    const weekEnd = nextDay(nextDay(nextDay(nextDay(nextDay(nextDay(observedWeekKey))))));
-    if (rangeOverrides.some((range) => range.startDate <= weekEnd && range.endDate >= observedWeekKey)) {
+    if (rangeOverrides.some((range) => rangeOverlapsObservedWeek(range, observedWeekKey))) {
       covered += 1;
     }
   }
@@ -721,7 +840,10 @@ function rangesCoverPeriod(
   return Boolean(coveredThrough && coveredThrough >= endDate);
 }
 
-function buildSuggestedReviewData(year: number): SuggestedReviewData {
+function buildSuggestedReviewData(
+  year: number,
+  resolveSubjectKey: (userid: string) => string
+): SuggestedReviewData {
   const snapshots = listSnapshotsInRange<UserlsDailyPayload>(
     "userls_daily",
     `${year}-01-01`,
@@ -730,7 +852,7 @@ function buildSuggestedReviewData(year: number): SuggestedReviewData {
   const periods = new Map<
     string,
     {
-      userid: string;
+      subjectKey: string;
       monthKey: string;
       startDate: string;
       endDate: string;
@@ -739,19 +861,20 @@ function buildSuggestedReviewData(year: number): SuggestedReviewData {
       areaBuckets: Map<string, number>;
     }
   >();
-  const coverageByUser = new Map<string, CoverageSummary>();
+  const coverageBySubjectKey = new Map<string, CoverageSummary>();
 
   for (const snapshot of snapshots) {
     const monthKey = snapshot.dateKey.slice(0, 7);
     for (const user of snapshot.payload.users || []) {
       const userid = normalizeOptionalString(user.userid);
       if (!userid) continue;
+      const subjectKey = resolveSubjectKey(userid);
 
       const replPlates = asInt(user.replenishmentNoRecvPlates);
       if (replPlates <= 0) continue;
 
       const coverage =
-        coverageByUser.get(userid) ||
+        coverageBySubjectKey.get(subjectKey) ||
         {
           observedWeekKeys: new Set<string>(),
           firstObservedDate: null,
@@ -766,13 +889,13 @@ function buildSuggestedReviewData(year: number): SuggestedReviewData {
         !coverage.lastObservedDate || snapshot.dateKey > coverage.lastObservedDate
           ? snapshot.dateKey
           : coverage.lastObservedDate;
-      coverageByUser.set(userid, coverage);
+      coverageBySubjectKey.set(subjectKey, coverage);
 
-      const periodKey = `${userid}:${monthKey}`;
+      const periodKey = `${subjectKey}:${monthKey}`;
       const period =
         periods.get(periodKey) ||
         {
-          userid,
+          subjectKey,
           monthKey,
           startDate: `${monthKey}-01`,
           endDate: monthEnd(monthKey),
@@ -792,12 +915,12 @@ function buildSuggestedReviewData(year: number): SuggestedReviewData {
     }
   }
 
-  const periodsByUser = new Map<string, RawMonthlyPeriod[]>();
+  const periodsBySubjectKey = new Map<string, RawMonthlyPeriod[]>();
   for (const period of periods.values()) {
     const role = chooseDominant(period.roleBuckets, period.replenishmentPlates);
     const area = chooseDominant(period.areaBuckets, period.replenishmentPlates);
-    const userPeriods = periodsByUser.get(period.userid) || [];
-    const previous = userPeriods[userPeriods.length - 1] || null;
+    const subjectPeriods = periodsBySubjectKey.get(period.subjectKey) || [];
+    const previous = subjectPeriods[subjectPeriods.length - 1] || null;
     const basePeriod = {
       startDate: period.startDate,
       endDate: period.endDate,
@@ -807,17 +930,17 @@ function buildSuggestedReviewData(year: number): SuggestedReviewData {
       roleShare: role.share,
       replenishmentPlates: period.replenishmentPlates,
     };
-    userPeriods.push({
-      userid: period.userid,
+    subjectPeriods.push({
+      subjectKey: period.subjectKey,
       ...basePeriod,
       ...classifyPeriod(basePeriod, previous),
     });
-    periodsByUser.set(period.userid, userPeriods);
+    periodsBySubjectKey.set(period.subjectKey, subjectPeriods);
   }
 
-  const segmentsByUser = new Map<string, SuggestedReviewSegment[]>();
-  for (const [userid, userPeriods] of periodsByUser.entries()) {
-    const orderedPeriods = userPeriods.sort((left, right) =>
+  const segmentsBySubjectKey = new Map<string, SuggestedReviewSegment[]>();
+  for (const [subjectKey, subjectPeriods] of periodsBySubjectKey.entries()) {
+    const orderedPeriods = subjectPeriods.sort((left, right) =>
       left.startDate.localeCompare(right.startDate)
     );
     const segments: SuggestedReviewSegment[] = [];
@@ -848,12 +971,12 @@ function buildSuggestedReviewData(year: number): SuggestedReviewData {
       }
     }
 
-    segmentsByUser.set(userid, segments);
+    segmentsBySubjectKey.set(subjectKey, segments);
   }
 
   return {
-    segmentsByUser,
-    coverageByUser,
+    segmentsBySubjectKey,
+    coverageBySubjectKey,
   };
 }
 
@@ -861,8 +984,11 @@ export function listHistoricalRoleAlignment(
   year: number
 ): HistoricalRoleAlignmentRow[] {
   const db = getDb();
-  const { segmentsByUser, coverageByUser } = buildSuggestedReviewData(year);
   const resolveSubjectKey = buildSubjectKeyResolver(year);
+  const { segmentsBySubjectKey, coverageBySubjectKey } = buildSuggestedReviewData(
+    year,
+    resolveSubjectKey
+  );
   const rows = db
     .prepare(
       `
@@ -894,9 +1020,6 @@ export function listHistoricalRoleAlignment(
       `
     )
     .all(year) as DbGlobalOverrideRow[];
-  const overridesBySubjectKey = new Map(
-    overrideRows.map((overrideRow) => [overrideRow.subject_key, overrideRow])
-  );
   const rangeRows = db
     .prepare(
       `
@@ -917,6 +1040,27 @@ export function listHistoricalRoleAlignment(
       `
     )
     .all(year) as DbRangeOverrideRow[];
+  return buildHistoricalRoleAlignmentRows(
+    year,
+    rows,
+    overrideRows,
+    rangeRows,
+    { segmentsBySubjectKey, coverageBySubjectKey },
+    resolveSubjectKey
+  );
+}
+
+function buildHistoricalRoleAlignmentRows(
+  year: number,
+  rows: DbRow[],
+  overrideRows: DbGlobalOverrideRow[],
+  rangeRows: DbRangeOverrideRow[],
+  suggestedReviewData: SuggestedReviewData,
+  resolveSubjectKey: (userid: string) => string
+) {
+  const overridesBySubjectKey = new Map(
+    overrideRows.map((overrideRow) => [overrideRow.subject_key, overrideRow])
+  );
   const rangesBySubjectKey = new Map<string, SavedRangeOverride[]>();
 
   for (const rangeRow of rangeRows) {
@@ -951,6 +1095,13 @@ export function listHistoricalRoleAlignment(
       primary_role: row.primary_role,
       primary_area: row.primary_area,
     };
+    const suggestedReviewSegments =
+      suggestedReviewData.segmentsBySubjectKey.get(subjectKey) ||
+      suggestedReviewData.segmentsBySubjectKey.get(row.userid) ||
+      [];
+    const coverage =
+      suggestedReviewData.coverageBySubjectKey.get(subjectKey) ||
+      suggestedReviewData.coverageBySubjectKey.get(row.userid);
 
     return mapRow(
       row,
@@ -958,15 +1109,19 @@ export function listHistoricalRoleAlignment(
       globalOverride,
       rangeOverrides,
       markUncoveredSegments(
-        segmentsByUser.get(row.userid) || [],
+        suggestedReviewSegments,
         globalOverrideContext,
         rangeOverrides,
         fallback
       ),
-      coverageByUser.get(row.userid)
+      coverage
     );
   });
 }
+
+export const historicalRoleAlignmentTestInternals = {
+  buildHistoricalRoleAlignmentRows,
+};
 
 export function saveHistoricalRoleAlignmentOverride(
   input: HistoricalRoleAlignmentOverrideInput
