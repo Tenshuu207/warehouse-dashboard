@@ -4,14 +4,18 @@ import { useEffect, useState } from "react";
 import ControlBar from "@/components/control-bar";
 import OverviewEnrichedCore from "@/components/overview-enriched-core";
 import WeeklySheetView from "@/components/weekly-sheet-view";
+import { useAppState } from "@/lib/app-state";
+import { rangeLabel, resolveContextRange } from "@/lib/date-range";
 
 type OverviewMode = "sheet" | "detail";
 
 const STORAGE_KEY = "warehouse-dashboard-overview-mode";
 
 export default function HomePage() {
+  const { selectedWeek } = useAppState();
   const [mode, setMode] = useState<OverviewMode>("sheet");
   const [ready, setReady] = useState(false);
+  const range = resolveContextRange(selectedWeek, null);
 
   useEffect(() => {
     try {
@@ -46,6 +50,9 @@ export default function HomePage() {
               <h2 className="text-xl font-bold">Overview</h2>
               <p className="mt-1 text-xs text-slate-600">
                 Sheet-first operational command view with enriched detail still available.
+              </p>
+              <p className="mt-1 text-xs font-medium text-slate-500">
+                Active range: {rangeLabel(range)}
               </p>
             </div>
 

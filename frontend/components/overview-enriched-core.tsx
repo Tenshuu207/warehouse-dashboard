@@ -3,6 +3,11 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/lib/app-state";
+import { rangeHref, resolveContextRange } from "@/lib/date-range";
+import {
+  formatOperationalAreaLabel,
+  resolveOperationalAreaGroup,
+} from "@/lib/area-labels";
 import PageHeader from "./shared/PageHeader";
 import StatCard from "./shared/StatCard";
 
@@ -55,6 +60,7 @@ export default function OverviewEnrichedCore() {
   const [data, setData] = useState<TeamGroupsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const range = resolveContextRange(selectedWeek, null);
 
   useEffect(() => {
     let cancelled = false;
@@ -304,7 +310,10 @@ export default function OverviewEnrichedCore() {
               {topOperators.map((op) => (
                 <tr key={op.userid} className="border-b last:border-b-0">
                   <td className="px-3 py-2">
-                    <Link href={`/operators/${op.userid}`} className="font-medium hover:underline">
+                    <Link
+                      href={rangeHref(`/operators/${encodeURIComponent(op.userid)}`, range)}
+                      className="font-medium hover:underline"
+                    >
                       {op.name}
                     </Link>
                     <div className="text-[11px] text-slate-500">{op.userid}</div>
@@ -322,7 +331,25 @@ export default function OverviewEnrichedCore() {
                       <span className="text-slate-400">—</span>
                     )}
                   </td>
-                  <td className="px-3 py-2">{op.observedArea || "—"}</td>
+                  <td className="px-3 py-2">
+                    {op.observedArea ? (() => {
+                      const area = resolveOperationalAreaGroup(op.observedArea);
+                      const label = area?.label || formatOperationalAreaLabel(op.observedArea);
+
+                      return area ? (
+                        <Link
+                          href={rangeHref(`/areas/${encodeURIComponent(area.key)}`, range)}
+                          className="font-medium hover:underline"
+                        >
+                          {label}
+                        </Link>
+                      ) : (
+                        label
+                      );
+                    })() : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2">{fmt(op.replenishmentPlates)}</td>
                   <td className="px-3 py-2">{fmt(op.replenishmentPieces)}</td>
                   <td className="px-3 py-2">{fmt(op.receivingPlates)}</td>

@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/lib/app-state";
+import {
+  formatOperationalAreaLabel,
+  resolveOperationalAreaGroup,
+} from "@/lib/area-labels";
 import ContextBadge from "@/components/shared/ContextBadge";
 import DetailDisclosure from "@/components/shared/DetailDisclosure";
 import SectionBlock from "@/components/shared/SectionBlock";
@@ -252,7 +256,8 @@ export default function TeamGroupSummary() {
                           <td className="px-3 py-2 align-top">
                             {op.observedArea ? (
                               <ContextBadge variant="observed-team">
-                                {op.observedArea}
+                                {resolveOperationalAreaGroup(op.observedArea)?.label ||
+                                  formatOperationalAreaLabel(op.observedArea)}
                               </ContextBadge>
                             ) : (
                               <span className="text-slate-400">—</span>

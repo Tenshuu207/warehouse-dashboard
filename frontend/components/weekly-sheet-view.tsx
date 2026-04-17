@@ -9,6 +9,11 @@ import {
   type ResolvedDashboardData,
 } from "@/lib/data-resolver";
 import {
+  formatOperationalAreaLabel,
+  resolveOperationalAreaGroup,
+} from "@/lib/area-labels";
+import { rangeHref, resolveContextRange } from "@/lib/date-range";
+import {
   resolveOperatorIdentity,
   type EmployeeRecord,
   type OperatorDefault,
@@ -73,30 +78,6 @@ function mergeKeyForEmployee(employeeId: string | null, resolvedName: string, us
   return `rf:${userid}`;
 }
 
-function normalizeWeeklyAreaLabel(value: unknown): string {
-  const raw = String(value || "").trim();
-  if (!raw) return "Other";
-
-  const key = raw.toLowerCase();
-
-  if (key.includes("freezer pir") || key == "frzpir") return "Freezer PIR";
-  if (key == "freezer" || key.startsWith("frz")) return "Freezer";
-  if (key.includes("dry pir") || key == "drypir") return "Dry PIR";
-  if (key == "dry" || key.startsWith("dry")) return "Dry";
-
-  if (
-    key.includes("cooler") ||
-    key.includes("produce") ||
-    key.includes("seafood") ||
-    key.includes("chicken") ||
-    key.includes("clr")
-  ) {
-    return "Cooler";
-  }
-
-  return raw;
-}
-
 type AreaBucketLike = {
   areaCode?: string | null;
   area?: string | null;
@@ -117,7 +98,8 @@ type AreaBucketLike = {
 };
 
 type AreaTotalRow = {
-  area: string;
+  areaKey: string;
+  areaLabel: string;
   letdownPlates: number;
   letdownPieces: number;
   putawayPlates: number;
@@ -215,6 +197,7 @@ export default function WeeklySheetView({
   dataSource?: "dashboard" | "userls-overview";
 }) {
   const { selectedWeek } = useAppState();
+  const range = resolveContextRange(selectedWeek, null);
   const [data, setData] = useState<ResolvedDashboardData | null>(null);
   const [defaults, setDefaults] = useState<Record<string, OperatorDefault>>({});
   const [employees, setEmployees] = useState<Record<string, EmployeeRecord>>({});
@@ -451,13 +434,15 @@ export default function WeeklySheetView({
     const ops = (data?.operators ?? []) as Array<Record<string, unknown>>;
     const grouped = new Map<string, AreaTotalRow>();
 
-    function ensure(area: string): AreaTotalRow {
-      const normalized = normalizeWeeklyAreaLabel(area);
-      const existing = grouped.get(normalized);
+    function ensure(areaValue: unknown): AreaTotalRow {
+      const group = resolveOperationalAreaGroup(areaValue);
+      const areaKey = group?.key || String(areaValue || "Other").trim() || "Other";
+      const existing = grouped.get(areaKey);
       if (existing) return existing;
 
       const created: AreaTotalRow = {
-        area: normalized,
+        areaKey,
+        areaLabel: group?.label || formatOperationalAreaLabel(areaValue),
         letdownPlates: 0,
         letdownPieces: 0,
         putawayPlates: 0,
@@ -467,7 +452,7 @@ export default function WeeklySheetView({
         totalPlates: 0,
         totalPieces: 0,
       };
-      grouped.set(normalized, created);
+      grouped.set(areaKey, created);
       return created;
     }
 
@@ -893,15 +878,15 @@ export default function WeeklySheetView({
           </thead>
           <tbody>
             {areaTotals.map((row) => (
-              <tr key={`area-total-${row.area}`}>
+              <tr key={`area-total-${row.areaKey}`}>
                 <td className="border border-slate-900 px-3 py-1.5 font-medium">
                   <Link
-                    href={`/areas/${encodeURIComponent(row.area)}`}
-                    className="hover:underline"
-                  >
-                    {row.area}
-                  </Link>
-                </td>
+                  href={rangeHref(`/areas/${encodeURIComponent(row.areaKey)}`, range)}
+                  className="hover:underline"
+                >
+                  {row.areaLabel}
+                </Link>
+              </td>
                 <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
                   {fmt(row.letdownPlates)}
                 </td>

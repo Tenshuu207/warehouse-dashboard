@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useAppState } from "@/lib/app-state";
+import {
+  formatOperationalAreaLabel,
+  resolveOperationalAreaGroup,
+} from "@/lib/area-labels";
 
 type TeamGroupsResponse = {
   date: string;
@@ -192,7 +196,11 @@ export default function PerformanceObservedRoleSummary() {
                           <span className="text-slate-400">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2">{op.observedArea || "—"}</td>
+                      <td className="px-3 py-2">
+                        {resolveOperationalAreaGroup(op.observedArea)?.label ||
+                          formatOperationalAreaLabel(op.observedArea) ||
+                          "—"}
+                      </td>
                       <td className="px-3 py-2">{fmt(op.replenishmentPlates)}</td>
                       <td className="px-3 py-2">{fmt(op.replenishmentPieces)}</td>
                       <td className="px-3 py-2">{fmt(op.receivingPlates)}</td>

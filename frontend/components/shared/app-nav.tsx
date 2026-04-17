@@ -5,20 +5,20 @@ import { usePathname } from "next/navigation";
 
 const PRIMARY_ITEMS = [
   { href: "/", label: "Overview" },
-  { href: "/performance", label: "Performance" },
-  { href: "/receiving", label: "Receiving" },
-  { href: "/areas", label: "Areas" },
   { href: "/operators", label: "Operators" },
-  { href: "/assignment-review", label: "Review" },
-  { href: "/standards", label: "Standards" },
+  { href: "/options", label: "Admin" },
 ];
 
 const SECONDARY_ITEMS = [
+  { href: "/performance", label: "Performance" },
+  { href: "/receiving", label: "Receiving" },
+  { href: "/areas", label: "Areas" },
+  { href: "/assignment-review", label: "Review" },
+  { href: "/standards", label: "Standards" },
   { href: "/weekly-sheet", label: "Weekly Sheet" },
   { href: "/daily-sheet", label: "Daily Sheet" },
   { href: "/range-sheet", label: "Range Sheet" },
   { href: "/options/userls-history", label: "UserLS Import" },
-  { href: "/options", label: "Options" },
 ];
 
 function isActive(pathname: string, href: string) {
