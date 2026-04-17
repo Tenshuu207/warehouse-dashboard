@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAppState } from "@/lib/app-state";
+import {
+  formatOperationalAreaLabel,
+  resolveOperationalAreaGroup,
+} from "@/lib/area-labels";
 import PageHeader from "./shared/PageHeader";
 import StatCard from "./shared/StatCard";
 
@@ -226,7 +230,11 @@ export default function PerformanceEnrichedCore() {
                           <span className="text-slate-400">—</span>
                         )}
                       </td>
-                      <td className="px-3 py-2">{op.observedArea || "—"}</td>
+                      <td className="px-3 py-2">
+                        {resolveOperationalAreaGroup(op.observedArea)?.label ||
+                          formatOperationalAreaLabel(op.observedArea) ||
+                          "—"}
+                      </td>
                       <td className="px-3 py-2">{fmt(op.replenishmentPlates)}</td>
                       <td className="px-3 py-2">{fmt(op.replenishmentPieces)}</td>
                       <td className="px-3 py-2">{fmt(op.receivingPlates)}</td>

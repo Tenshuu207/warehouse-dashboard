@@ -10,7 +10,9 @@
     "Receiving",
     "Inventory",
     "Night Shift",
-    "Delivery Drivers"
+    "Delivery Drivers",
+    "Manager",
+    "Will Call"
   ],
   "roles": [
     "FrzPut",
@@ -29,7 +31,8 @@
     "FrzRcv",
     "MixRcv",
     "NSDrp",
-    "Intern"
+    "Intern",
+    "Lumper"
   ],
   "reviewStatuses": [
     "pending",

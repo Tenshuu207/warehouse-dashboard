@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import OperatorUserlsTracking from "@/components/operator-userls-tracking";
 import ControlBar from "@/components/control-bar";
 import PageHeader from "@/components/shared/PageHeader";
@@ -11,6 +11,7 @@ import ContextBadge from "@/components/shared/ContextBadge";
 import SectionBlock from "@/components/shared/SectionBlock";
 import DetailDisclosure from "@/components/shared/DetailDisclosure";
 import { useAppState } from "@/lib/app-state";
+import { rangeHref, rangeLabel, resolveContextRange } from "@/lib/date-range";
 import { getWeekData, type ResolvedDashboardData } from "@/lib/data-resolver";
 import {
   resolveOperatorIdentity,
@@ -142,7 +143,10 @@ function fmt(value: number | null | undefined, digits = 0): string {
 export default function OperatorDetailPage() {
   const { selectedWeek } = useAppState();
   const params = useParams<{ userid: string }>();
+  const searchParams = useSearchParams();
   const userid = Array.isArray(params?.userid) ? params.userid[0] : params?.userid;
+  const range = resolveContextRange(selectedWeek, searchParams);
+  const scopeDate = range.start;
 
   const [data, setData] = useState<ResolvedDashboardData | null>(null);
   const [defaults, setDefaults] = useState<Record<string, OperatorDefault>>({});
@@ -160,7 +164,7 @@ export default function OperatorDetailPage() {
         setError(null);
 
         const [nextData, defaultsRes, employeesRes, mappingsRes] = await Promise.all([
-          getWeekData(selectedWeek),
+          getWeekData(scopeDate),
           fetch("/api/operator-defaults", { cache: "no-store" }),
           fetch("/api/employees", { cache: "no-store" }),
           fetch("/api/rf-mappings", { cache: "no-store" }),
@@ -190,7 +194,7 @@ export default function OperatorDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedWeek]);
+  }, [scopeDate]);
 
   const operator = useMemo(() => {
     if (!data || !userid) return null;
@@ -206,7 +210,7 @@ export default function OperatorDetailPage() {
         base.effectiveAssignedArea ||
         base.assignedArea ||
         base.area,
-      selectedDate: selectedWeek,
+      selectedDate: scopeDate,
       employees,
       mappings,
       defaultTeams: defaults,
@@ -216,7 +220,7 @@ export default function OperatorDetailPage() {
       ...base,
       resolvedName: resolved.displayName,
     };
-  }, [data, userid, selectedWeek, employees, mappings, defaults]);
+  }, [data, userid, scopeDate, employees, mappings, defaults]);
 
   const rawDiffers = operator
     ? (operator.rawAssignedArea || "") !== (operator.effectiveAssignedArea || "") ||
@@ -230,10 +234,10 @@ export default function OperatorDetailPage() {
 
         <SectionBlock
           title=""
-          right={<div className="text-right text-xs text-slate-500">{selectedWeek}</div>}
+          right={<div className="text-right text-xs text-slate-500">{rangeLabel(range)}</div>}
         >
           <div className="text-xs text-slate-500">
-            <Link href="/operators" className="hover:underline">
+            <Link href={rangeHref("/operators", range)} className="hover:underline">
               ← Back to Operators
             </Link>
           </div>

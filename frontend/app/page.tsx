@@ -4,22 +4,24 @@ import { useEffect, useState } from "react";
 import ControlBar from "@/components/control-bar";
 import OverviewEnrichedCore from "@/components/overview-enriched-core";
 import WeeklySheetView from "@/components/weekly-sheet-view";
+import { useAppState } from "@/lib/app-state";
+import { rangeLabel, resolveContextRange } from "@/lib/date-range";
 
-type OverviewMode = "summary" | "sheet";
+type OverviewMode = "sheet" | "detail";
 
 const STORAGE_KEY = "warehouse-dashboard-overview-mode";
 
 export default function HomePage() {
-  const [mode, setMode] = useState<OverviewMode>("summary");
+  const { selectedWeek } = useAppState();
+  const [mode, setMode] = useState<OverviewMode>("sheet");
   const [ready, setReady] = useState(false);
+  const range = resolveContextRange(selectedWeek, null);
 
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(STORAGE_KEY);
-      if (saved === "summary" || saved === "sheet") {
+      if (saved === "sheet" || saved === "detail") {
         setMode(saved);
-      } else if (saved === "detail") {
-        setMode("sheet");
       }
     } catch {
       // ignore localStorage issues
@@ -47,22 +49,14 @@ export default function HomePage() {
             <div>
               <h2 className="text-xl font-bold">Overview</h2>
               <p className="mt-1 text-xs text-slate-600">
-                Five-metric command summary with sheet detail still available.
+                Sheet-first operational command view with enriched detail still available.
+              </p>
+              <p className="mt-1 text-xs font-medium text-slate-500">
+                Active range: {rangeLabel(range)}
               </p>
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setMode("summary")}
-                className={`rounded-lg border px-3 py-2 text-sm font-medium ${
-                  mode === "summary"
-                    ? "border-slate-900 bg-slate-900 text-white"
-                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                }`}
-              >
-                Summary
-              </button>
               <button
                 type="button"
                 onClick={() => setMode("sheet")}
@@ -72,16 +66,27 @@ export default function HomePage() {
                     : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
                 }`}
               >
-                Sheet Detail
+                Sheet View
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("detail")}
+                className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                  mode === "detail"
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                Detail View
               </button>
             </div>
           </div>
         </section>
 
-        {mode === "summary" ? (
-          <OverviewEnrichedCore />
-        ) : (
+        {mode === "sheet" ? (
           <WeeklySheetView dataSource="userls-overview" />
+        ) : (
+          <OverviewEnrichedCore />
         )}
       </div>
     </main>

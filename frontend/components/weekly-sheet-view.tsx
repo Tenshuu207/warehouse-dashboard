@@ -9,6 +9,11 @@ import {
   type ResolvedDashboardData,
 } from "@/lib/data-resolver";
 import {
+  formatOperationalAreaLabel,
+  resolveOperationalAreaGroup,
+} from "@/lib/area-labels";
+import { rangeHref, resolveContextRange } from "@/lib/date-range";
+import {
   resolveOperatorIdentity,
   type EmployeeRecord,
   type OperatorDefault,
@@ -73,37 +78,11 @@ function mergeKeyForEmployee(employeeId: string | null, resolvedName: string, us
   return `rf:${userid}`;
 }
 
-function normalizeWeeklyAreaLabel(value: unknown): string {
-  const raw = String(value || "").trim();
-  if (!raw) return "Other";
-
-  const key = raw.toLowerCase();
-
-  if (key.includes("freezer pir") || key == "frzpir") return "Freezer PIR";
-  if (key == "freezer" || key.startsWith("frz")) return "Freezer";
-  if (key.includes("dry pir") || key == "drypir") return "Dry PIR";
-  if (key == "dry" || key.startsWith("dry")) return "Dry";
-
-  if (
-    key.includes("cooler") ||
-    key.includes("produce") ||
-    key.includes("seafood") ||
-    key.includes("chicken") ||
-    key.includes("clr")
-  ) {
-    return "Cooler";
-  }
-
-  return raw;
-}
-
 type AreaBucketLike = {
   areaCode?: string | null;
   area?: string | null;
   label?: string | null;
   name?: string | null;
-  receivingPlates?: number;
-  receivingPieces?: number;
   letdownPlates?: number;
   letdownPieces?: number;
   putawayPlates?: number;
@@ -119,9 +98,8 @@ type AreaBucketLike = {
 };
 
 type AreaTotalRow = {
-  area: string;
-  receivingPlates: number;
-  receivingPieces: number;
+  areaKey: string;
+  areaLabel: string;
   letdownPlates: number;
   letdownPieces: number;
   putawayPlates: number;
@@ -150,6 +128,7 @@ type Row = {
   primaryUserid: string;
   rfUsernames: string[];
   name: string;
+  role: string;
   area: string;
   letdownPlates: number;
   letdownPieces: number;
@@ -218,6 +197,7 @@ export default function WeeklySheetView({
   dataSource?: "dashboard" | "userls-overview";
 }) {
   const { selectedWeek } = useAppState();
+  const range = resolveContextRange(selectedWeek, null);
   const [data, setData] = useState<ResolvedDashboardData | null>(null);
   const [defaults, setDefaults] = useState<Record<string, OperatorDefault>>({});
   const [employees, setEmployees] = useState<Record<string, EmployeeRecord>>({});
@@ -306,13 +286,41 @@ export default function WeeklySheetView({
 
       const employeeId = resolved.employeeId || null;
       const rowKey = mergeKeyForEmployee(employeeId, name || fallbackName, userid);
+      const tracking =
+        op.userlsTracking && typeof op.userlsTracking === "object"
+          ? (op.userlsTracking as Record<string, unknown>)
+          : null;
+
+      const role = String(
+        dataSource === "userls-overview"
+          ? op.observedRole ||
+              tracking?.observedRole ||
+              op.primaryReplenishmentRole ||
+              tracking?.primaryReplenishmentRole ||
+              op.effectiveAssignedRole ||
+              op.currentRole ||
+              op.rawAssignedRole ||
+              "—"
+          : op.effectiveAssignedRole ||
+              op.currentRole ||
+              op.rawAssignedRole ||
+              "—"
+      );
 
       const area = String(
-        op.effectivePerformanceArea ||
-          op.rawDominantArea ||
-          op.effectiveAssignedArea ||
-          op.area ||
-          "Other"
+        dataSource === "userls-overview"
+          ? op.observedArea ||
+              tracking?.observedArea ||
+              op.effectivePerformanceArea ||
+              op.rawDominantArea ||
+              op.effectiveAssignedArea ||
+              op.area ||
+              "Other"
+          : op.effectivePerformanceArea ||
+              op.rawDominantArea ||
+              op.effectiveAssignedArea ||
+              op.area ||
+              "Other"
       );
 
       const letdownPlates = safeNum(op.letdownPlates);
@@ -323,16 +331,8 @@ export default function WeeklySheetView({
       const restockPieces = safeNum(op.restockPieces);
       const receivingPlates = safeNum(op.receivingPlates);
       const receivingPieces = safeNum(op.receivingPieces);
-      const replenishmentPlates = letdownPlates + putawayPlates + restockPlates;
-      const replenishmentPieces = letdownPieces + putawayPieces + restockPieces;
-      const totalPlates =
-        dataSource === "userls-overview"
-          ? safeNum(op.totalPlates) || replenishmentPlates + receivingPlates
-          : replenishmentPlates;
-      const totalPieces =
-        dataSource === "userls-overview"
-          ? safeNum(op.totalPieces) || replenishmentPieces + receivingPieces
-          : replenishmentPieces;
+      const totalPlates = letdownPlates + putawayPlates + restockPlates;
+      const totalPieces = letdownPieces + putawayPieces + restockPieces;
 
       if (!grouped.has(rowKey)) {
         grouped.set(rowKey, {
@@ -341,6 +341,7 @@ export default function WeeklySheetView({
           primaryUserid: userid,
           rfUsernames: [userid],
           name,
+          role,
           area,
           letdownPlates,
           letdownPieces,
@@ -369,6 +370,13 @@ export default function WeeklySheetView({
       existing.totalPieces += totalPieces;
       existing.receivingPlates += receivingPlates;
       existing.receivingPieces += receivingPieces;
+
+      if (
+        existing.role === "—" &&
+        role !== "—"
+      ) {
+        existing.role = role;
+      }
 
       if (
         (existing.area === "Other" || !existing.area) &&
@@ -426,15 +434,15 @@ export default function WeeklySheetView({
     const ops = (data?.operators ?? []) as Array<Record<string, unknown>>;
     const grouped = new Map<string, AreaTotalRow>();
 
-    function ensure(area: string): AreaTotalRow {
-      const normalized = normalizeWeeklyAreaLabel(area);
-      const existing = grouped.get(normalized);
+    function ensure(areaValue: unknown): AreaTotalRow {
+      const group = resolveOperationalAreaGroup(areaValue);
+      const areaKey = group?.key || String(areaValue || "Other").trim() || "Other";
+      const existing = grouped.get(areaKey);
       if (existing) return existing;
 
       const created: AreaTotalRow = {
-        area: normalized,
-        receivingPlates: 0,
-        receivingPieces: 0,
+        areaKey,
+        areaLabel: group?.label || formatOperationalAreaLabel(areaValue),
         letdownPlates: 0,
         letdownPieces: 0,
         putawayPlates: 0,
@@ -444,7 +452,7 @@ export default function WeeklySheetView({
         totalPlates: 0,
         totalPieces: 0,
       };
-      grouped.set(normalized, created);
+      grouped.set(areaKey, created);
       return created;
     }
 
@@ -461,8 +469,6 @@ export default function WeeklySheetView({
           const letdownPieces = safeNum(bucket.letdownPieces);
           const putawayPlates = safeNum(bucket.putawayPlates);
           const putawayPieces = safeNum(bucket.putawayPieces);
-          const receivingPlates = safeNum(bucket.receivingPlates);
-          const receivingPieces = safeNum(bucket.receivingPieces);
           const restockPlates =
             dataSource === "userls-overview"
               ? safeNum(bucket.restockLikePlatesEstimated) || safeNum(bucket.restockPlatesRaw)
@@ -476,24 +482,14 @@ export default function WeeklySheetView({
                 safeNum(bucket.restockPiecesRaw) ||
                 safeNum(bucket.restockLikePiecesEstimated);
 
-          target.receivingPlates += receivingPlates;
-          target.receivingPieces += receivingPieces;
           target.letdownPlates += letdownPlates;
           target.letdownPieces += letdownPieces;
           target.putawayPlates += putawayPlates;
           target.putawayPieces += putawayPieces;
           target.restockPlates += restockPlates;
           target.restockPieces += restockPieces;
-          target.totalPlates +=
-            letdownPlates +
-            putawayPlates +
-            restockPlates +
-            (dataSource === "userls-overview" ? receivingPlates : 0);
-          target.totalPieces +=
-            letdownPieces +
-            putawayPieces +
-            restockPieces +
-            (dataSource === "userls-overview" ? receivingPieces : 0);
+          target.totalPlates += letdownPlates + putawayPlates + restockPlates;
+          target.totalPieces += letdownPieces + putawayPieces + restockPieces;
         }
         continue;
       }
@@ -511,8 +507,6 @@ export default function WeeklySheetView({
       const letdownPieces = safeNum(op.letdownPieces);
       const putawayPlates = safeNum(op.putawayPlates);
       const putawayPieces = safeNum(op.putawayPieces);
-      const receivingPlates = safeNum(op.receivingPlates);
-      const receivingPieces = safeNum(op.receivingPieces);
       const restockPlates =
         dataSource === "userls-overview"
           ? safeNum(op.restockLikePlatesEstimated) || safeNum(op.restockPlates)
@@ -522,24 +516,14 @@ export default function WeeklySheetView({
           ? safeNum(op.restockLikePiecesEstimated) || safeNum(op.restockPieces)
           : safeNum(op.restockPieces) || safeNum(op.restockLikePiecesEstimated);
 
-      target.receivingPlates += receivingPlates;
-      target.receivingPieces += receivingPieces;
       target.letdownPlates += letdownPlates;
       target.letdownPieces += letdownPieces;
       target.putawayPlates += putawayPlates;
       target.putawayPieces += putawayPieces;
       target.restockPlates += restockPlates;
       target.restockPieces += restockPieces;
-      target.totalPlates +=
-        letdownPlates +
-        putawayPlates +
-        restockPlates +
-        (dataSource === "userls-overview" ? receivingPlates : 0);
-      target.totalPieces +=
-        letdownPieces +
-        putawayPieces +
-        restockPieces +
-        (dataSource === "userls-overview" ? receivingPieces : 0);
+      target.totalPlates += letdownPlates + putawayPlates + restockPlates;
+      target.totalPieces += letdownPieces + putawayPieces + restockPieces;
     }
 
     return [...grouped.values()]
@@ -608,48 +592,6 @@ export default function WeeklySheetView({
     [rows]
   );
 
-  const topOperatorsByTotalPlates = useMemo(
-    () =>
-      [...rows]
-        .sort((a, b) => b.totalPlates - a.totalPlates)
-        .slice(0, 5),
-    [rows]
-  );
-
-  const topAreasByTotalPlates = useMemo(
-    () =>
-      [...areaTotals]
-        .sort((a, b) => b.totalPlates - a.totalPlates)
-        .slice(0, 5),
-    [areaTotals]
-  );
-
-  const activityMixRows = useMemo(
-    () => [
-      {
-        label: "Receiving",
-        plates: totals.receivingPlates,
-        pieces: totals.receivingPieces,
-      },
-      {
-        label: "Letdown",
-        plates: totals.letdownPlates,
-        pieces: totals.letdownPieces,
-      },
-      {
-        label: "Putaway",
-        plates: totals.putawayPlates,
-        pieces: totals.putawayPieces,
-      },
-      {
-        label: "Restock",
-        plates: totals.restockPlates,
-        pieces: totals.restockPieces,
-      },
-    ],
-    [totals]
-  );
-
   if (selectedWeekError) {
     return (
       <div className="border-2 border-slate-900 bg-white p-4 text-sm text-red-600">
@@ -674,298 +616,6 @@ export default function WeeklySheetView({
     );
   }
 
-  if (dataSource === "userls-overview") {
-    return (
-      <div className="space-y-4">
-        <section className="border-2 border-slate-900 bg-white">
-          <div className="border-b-2 border-slate-900 bg-slate-900 px-4 py-3 text-white">
-            <div className="text-lg font-bold">Sheet Detail</div>
-            <div className="mt-1 text-xs text-slate-200">
-              Operational support for Overview totals. Roles are not shown here.
-            </div>
-          </div>
-
-          <div className="grid gap-3 p-3 lg:grid-cols-3">
-            <SummaryBox title="Top Operators by Plates">
-              <div className="space-y-1 text-sm">
-                {topOperatorsByTotalPlates.length === 0 ? (
-                  <div className="text-slate-500">None</div>
-                ) : (
-                  topOperatorsByTotalPlates.map((row, idx) => (
-                    <div
-                      key={`overview-top-operator-${row.rowKey}`}
-                      className="grid grid-cols-[28px_1fr_auto] gap-2 border-b border-slate-200 py-1 last:border-b-0"
-                    >
-                      <div className="font-semibold text-slate-600">{idx + 1}</div>
-                      <Link
-                        href={`/operators/${encodeURIComponent(row.primaryUserid)}`}
-                        className="font-medium hover:underline"
-                      >
-                        {row.name}
-                      </Link>
-                      <div className="font-bold text-slate-900">
-                        {fmt(row.totalPlates)}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </SummaryBox>
-
-            <SummaryBox title="Top Areas by Plates">
-              <div className="space-y-1 text-sm">
-                {topAreasByTotalPlates.length === 0 ? (
-                  <div className="text-slate-500">None</div>
-                ) : (
-                  topAreasByTotalPlates.map((row, idx) => (
-                    <div
-                      key={`overview-top-area-${row.area}`}
-                      className="grid grid-cols-[28px_1fr_auto] gap-2 border-b border-slate-200 py-1 last:border-b-0"
-                    >
-                      <div className="font-semibold text-slate-600">{idx + 1}</div>
-                      <Link
-                        href={`/areas/${encodeURIComponent(row.area)}`}
-                        className="font-medium hover:underline"
-                      >
-                        {row.area}
-                      </Link>
-                      <div className="font-bold text-slate-900">
-                        {fmt(row.totalPlates)}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </SummaryBox>
-
-            <SummaryBox title="Activity Mix Totals">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-100 text-slate-900">
-                  <tr>
-                    <th className="border border-slate-900 px-2 py-1.5 text-left">Activity</th>
-                    <th className="border border-slate-900 px-2 py-1.5 text-right">Plates</th>
-                    <th className="border border-slate-900 px-2 py-1.5 text-right">Pieces</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {activityMixRows.map((row) => (
-                    <tr key={`overview-mix-${row.label}`}>
-                      <td className="border border-slate-900 px-2 py-1.5 font-medium">
-                        {row.label}
-                      </td>
-                      <td className="border border-slate-900 px-2 py-1.5 text-right">
-                        {fmt(row.plates)}
-                      </td>
-                      <td className="border border-slate-900 px-2 py-1.5 text-right">
-                        {fmt(row.pieces)}
-                      </td>
-                    </tr>
-                  ))}
-                  <tr className="font-bold">
-                    <td className="border border-slate-900 bg-yellow-200 px-2 py-1.5">
-                      Total
-                    </td>
-                    <td className="border border-slate-900 bg-yellow-200 px-2 py-1.5 text-right text-red-600">
-                      {fmt(totals.totalPlates)}
-                    </td>
-                    <td className="border border-slate-900 bg-yellow-200 px-2 py-1.5 text-right text-red-600">
-                      {fmt(totals.totalPieces)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </SummaryBox>
-          </div>
-        </section>
-
-        <section className="border-2 border-slate-900 bg-white">
-          <div className="border-b-2 border-slate-900 bg-blue-700 px-4 py-2 text-sm font-bold text-white">
-            Operator Breakdown
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1180px] border-collapse text-sm">
-              <thead>
-                <tr className="bg-slate-100 text-slate-900">
-                  <th className="border border-slate-900 px-3 py-2 text-left">Operator</th>
-                  <th className="border border-slate-900 px-3 py-2 text-left">Area</th>
-                  <th className="border border-slate-900 px-3 py-2 text-center" colSpan={2}>
-                    Receiving
-                  </th>
-                  <th className="border border-slate-900 px-3 py-2 text-center" colSpan={2}>
-                    Letdown
-                  </th>
-                  <th className="border border-slate-900 px-3 py-2 text-center" colSpan={2}>
-                    Putaway
-                  </th>
-                  <th className="border border-slate-900 px-3 py-2 text-center" colSpan={2}>
-                    Restock
-                  </th>
-                  <th className="border border-slate-900 px-3 py-2 text-center" colSpan={2}>
-                    Total
-                  </th>
-                </tr>
-                <tr className="bg-white text-slate-700">
-                  <th className="border border-slate-900 px-3 py-1.5 text-left"></th>
-                  <th className="border border-slate-900 px-3 py-1.5 text-left"></th>
-                  <th className="border border-slate-900 px-3 py-1.5 text-center">Plates</th>
-                  <th className="border border-slate-900 px-3 py-1.5 text-center">Pieces</th>
-                  <th className="border border-slate-900 px-3 py-1.5 text-center">Plates</th>
-                  <th className="border border-slate-900 px-3 py-1.5 text-center">Pieces</th>
-                  <th className="border border-slate-900 px-3 py-1.5 text-center">Plates</th>
-                  <th className="border border-slate-900 px-3 py-1.5 text-center">Pieces</th>
-                  <th className="border border-slate-900 px-3 py-1.5 text-center">Plates</th>
-                  <th className="border border-slate-900 px-3 py-1.5 text-center">Pieces</th>
-                  <th className="border border-slate-900 px-3 py-1.5 text-center">Plates</th>
-                  <th className="border border-slate-900 px-3 py-1.5 text-center">Pieces</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={`overview-row-${row.rowKey}`} className="bg-white">
-                    <td className="border border-slate-900 px-3 py-1.5 font-medium">
-                      <Link
-                        href={`/operators/${encodeURIComponent(row.primaryUserid)}`}
-                        className="hover:underline"
-                      >
-                        {row.name}
-                      </Link>
-                      <div className="text-[11px] text-slate-500">
-                        {row.rfUsernames.join(", ")}
-                      </div>
-                    </td>
-                    <td className="border border-slate-900 px-3 py-1.5">
-                      {normalizeWeeklyAreaLabel(row.area)}
-                    </td>
-                    <td className="border border-slate-900 bg-sky-50 px-3 py-1.5 text-right">
-                      {fmt(row.receivingPlates)}
-                    </td>
-                    <td className="border border-slate-900 bg-sky-50 px-3 py-1.5 text-right">
-                      {fmt(row.receivingPieces)}
-                    </td>
-                    <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
-                      {fmt(row.letdownPlates)}
-                    </td>
-                    <td className="border border-slate-900 bg-green-50 px-3 py-1.5 text-right">
-                      {fmt(row.letdownPieces)}
-                    </td>
-                    <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
-                      {fmt(row.putawayPlates)}
-                    </td>
-                    <td className="border border-slate-900 bg-green-50 px-3 py-1.5 text-right">
-                      {fmt(row.putawayPieces)}
-                    </td>
-                    <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
-                      {fmt(row.restockPlates)}
-                    </td>
-                    <td className="border border-slate-900 bg-green-50 px-3 py-1.5 text-right">
-                      {fmt(row.restockPieces)}
-                    </td>
-                    <td className="border border-slate-900 bg-yellow-200 px-3 py-1.5 text-right font-semibold">
-                      {fmt(row.totalPlates)}
-                    </td>
-                    <td className="border border-slate-900 bg-yellow-200 px-3 py-1.5 text-right font-semibold">
-                      {fmt(row.totalPieces)}
-                    </td>
-                  </tr>
-                ))}
-
-                <tr className="font-bold">
-                  <td className="border border-slate-900 bg-slate-100 px-3 py-2">
-                    Overview Total
-                  </td>
-                  <td className="border border-slate-900 bg-slate-100 px-3 py-2"></td>
-                  <td className="border border-slate-900 bg-sky-50 px-3 py-2 text-right text-red-600">
-                    {fmt(totals.receivingPlates)}
-                  </td>
-                  <td className="border border-slate-900 bg-sky-50 px-3 py-2 text-right text-red-600">
-                    {fmt(totals.receivingPieces)}
-                  </td>
-                  <td className="border border-slate-900 bg-blue-50 px-3 py-2 text-right text-red-600">
-                    {fmt(totals.letdownPlates)}
-                  </td>
-                  <td className="border border-slate-900 bg-green-50 px-3 py-2 text-right text-red-600">
-                    {fmt(totals.letdownPieces)}
-                  </td>
-                  <td className="border border-slate-900 bg-blue-50 px-3 py-2 text-right text-red-600">
-                    {fmt(totals.putawayPlates)}
-                  </td>
-                  <td className="border border-slate-900 bg-green-50 px-3 py-2 text-right text-red-600">
-                    {fmt(totals.putawayPieces)}
-                  </td>
-                  <td className="border border-slate-900 bg-blue-50 px-3 py-2 text-right text-red-600">
-                    {fmt(totals.restockPlates)}
-                  </td>
-                  <td className="border border-slate-900 bg-green-50 px-3 py-2 text-right text-red-600">
-                    {fmt(totals.restockPieces)}
-                  </td>
-                  <td className="border border-slate-900 bg-yellow-200 px-3 py-2 text-right text-red-600">
-                    {fmt(totals.totalPlates)}
-                  </td>
-                  <td className="border border-slate-900 bg-yellow-200 px-3 py-2 text-right text-red-600">
-                    {fmt(totals.totalPieces)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="border-2 border-slate-900 bg-white">
-          <div className="border-b-2 border-slate-900 bg-blue-700 px-4 py-2 text-sm font-bold text-white">
-            Area Distribution
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] border-collapse text-sm">
-              <thead>
-                <tr className="bg-slate-100 text-slate-900">
-                  <th className="border border-slate-900 px-3 py-2 text-left">Area</th>
-                  <th className="border border-slate-900 px-3 py-2 text-right">Receiving Plates</th>
-                  <th className="border border-slate-900 px-3 py-2 text-right">Letdown Plates</th>
-                  <th className="border border-slate-900 px-3 py-2 text-right">Putaway Plates</th>
-                  <th className="border border-slate-900 px-3 py-2 text-right">Restock Plates</th>
-                  <th className="border border-slate-900 px-3 py-2 text-right">Total Plates</th>
-                  <th className="border border-slate-900 px-3 py-2 text-right">Total Pieces</th>
-                </tr>
-              </thead>
-              <tbody>
-                {areaTotals.map((row) => (
-                  <tr key={`overview-area-${row.area}`}>
-                    <td className="border border-slate-900 px-3 py-1.5 font-medium">
-                      <Link
-                        href={`/areas/${encodeURIComponent(row.area)}`}
-                        className="hover:underline"
-                      >
-                        {row.area}
-                      </Link>
-                    </td>
-                    <td className="border border-slate-900 bg-sky-50 px-3 py-1.5 text-right">
-                      {fmt(row.receivingPlates)}
-                    </td>
-                    <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
-                      {fmt(row.letdownPlates)}
-                    </td>
-                    <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
-                      {fmt(row.putawayPlates)}
-                    </td>
-                    <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
-                      {fmt(row.restockPlates)}
-                    </td>
-                    <td className="border border-slate-900 bg-yellow-200 px-3 py-1.5 text-right font-semibold text-red-600">
-                      {fmt(row.totalPlates)}
-                    </td>
-                    <td className="border border-slate-900 bg-yellow-200 px-3 py-1.5 text-right font-semibold text-red-600">
-                      {fmt(row.totalPieces)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-4">
       <div className="border-2 border-slate-900 bg-white">
@@ -975,6 +625,7 @@ export default function WeeklySheetView({
               <thead>
                 <tr className="bg-blue-700 text-white">
                   <th className="border border-slate-900 px-3 py-2 text-left">Operator</th>
+                  <th className="border border-slate-900 px-3 py-2 text-left">Role</th>
                   <th className="border border-slate-900 px-3 py-2 text-center" colSpan={2}>
                     Letdowns
                   </th>
@@ -992,6 +643,7 @@ export default function WeeklySheetView({
                   </th>
                 </tr>
                 <tr className="bg-slate-100 text-slate-900">
+                  <th className="border border-slate-900 px-3 py-1.5 text-left"></th>
                   <th className="border border-slate-900 px-3 py-1.5 text-left"></th>
                   <th className="border border-slate-900 px-3 py-1.5 text-center">Plates</th>
                   <th className="border border-slate-900 px-3 py-1.5 text-center">Pieces</th>
@@ -1018,6 +670,7 @@ export default function WeeklySheetView({
                         RF IDs: {row.rfUsernames.join(", ")}
                       </div>
                     </td>
+                    <td className="border border-slate-900 px-3 py-1.5">{row.role}</td>
                     <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
                       {fmt(row.letdownPlates)}
                     </td>
@@ -1049,7 +702,7 @@ export default function WeeklySheetView({
                 ))}
 
                 <tr className="font-bold">
-                  <td className="border border-slate-900 bg-slate-100 px-3 py-2">
+                  <td className="border border-slate-900 bg-slate-100 px-3 py-2" colSpan={2}>
                     Week Total
                   </td>
                   <td className="border border-slate-900 bg-blue-50 px-3 py-2 text-right text-red-600">
@@ -1225,15 +878,15 @@ export default function WeeklySheetView({
           </thead>
           <tbody>
             {areaTotals.map((row) => (
-              <tr key={`area-total-${row.area}`}>
+              <tr key={`area-total-${row.areaKey}`}>
                 <td className="border border-slate-900 px-3 py-1.5 font-medium">
                   <Link
-                    href={`/areas/${encodeURIComponent(row.area)}`}
-                    className="hover:underline"
-                  >
-                    {row.area}
-                  </Link>
-                </td>
+                  href={rangeHref(`/areas/${encodeURIComponent(row.areaKey)}`, range)}
+                  className="hover:underline"
+                >
+                  {row.areaLabel}
+                </Link>
+              </td>
                 <td className="border border-slate-900 bg-blue-50 px-3 py-1.5 text-right">
                   {fmt(row.letdownPlates)}
                 </td>

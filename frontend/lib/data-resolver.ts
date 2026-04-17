@@ -35,6 +35,14 @@ export type ResolvedDashboardData = {
     putawayPieces: number;
     restockPlates: number;
     restockPieces: number;
+    restockPlatesRaw?: number;
+    restockPiecesRaw?: number;
+    restockLikePlatesEstimated?: number;
+    restockLikePiecesEstimated?: number;
+    totalPlatesNoRecv?: number;
+    totalPiecesNoRecv?: number;
+    replenishmentNoRecvPlates?: number;
+    replenishmentNoRecvPieces?: number;
 
     receivingPlates: number;
     receivingPieces: number;
@@ -200,6 +208,14 @@ function normalizeRaw(raw: JsonObj): ResolvedDashboardData {
       const putawayPieces = asNumber(o.putawayPieces);
       const restockPlates = asNumber(o.restockPlates);
       const restockPieces = asNumber(o.restockPieces);
+      const restockPlatesRaw = asNumber(o.restockPlatesRaw);
+      const restockPiecesRaw = asNumber(o.restockPiecesRaw);
+      const restockLikePlatesEstimated = asNumber(o.restockLikePlatesEstimated);
+      const restockLikePiecesEstimated = asNumber(o.restockLikePiecesEstimated);
+      const totalPlatesNoRecv = asNumber(o.totalPlatesNoRecv);
+      const totalPiecesNoRecv = asNumber(o.totalPiecesNoRecv);
+      const replenishmentNoRecvPlates = asNumber(o.replenishmentNoRecvPlates);
+      const replenishmentNoRecvPieces = asNumber(o.replenishmentNoRecvPieces);
 
       const replenishmentPlates =
         o.replenishmentPlates !== undefined
@@ -245,6 +261,14 @@ function normalizeRaw(raw: JsonObj): ResolvedDashboardData {
         putawayPieces,
         restockPlates,
         restockPieces,
+        restockPlatesRaw,
+        restockPiecesRaw,
+        restockLikePlatesEstimated,
+        restockLikePiecesEstimated,
+        totalPlatesNoRecv,
+        totalPiecesNoRecv,
+        replenishmentNoRecvPlates,
+        replenishmentNoRecvPieces,
 
         receivingPlates: asNumber(o.receivingPlates),
         receivingPieces: asNumber(o.receivingPieces),

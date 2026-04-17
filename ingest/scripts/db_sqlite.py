@@ -83,6 +83,36 @@ CREATE TABLE IF NOT EXISTS dataset_components (
     details_json TEXT,
     PRIMARY KEY (business_date, component_type)
 );
+
+CREATE TABLE IF NOT EXISTS historical_role_alignment (
+    year INTEGER NOT NULL,
+    userid TEXT NOT NULL,
+    name TEXT,
+    primary_role TEXT,
+    primary_role_share REAL,
+    primary_area TEXT,
+    primary_area_share REAL,
+    primary_activity_area TEXT,
+    yearly_repl_plates INTEGER NOT NULL DEFAULT 0,
+    yearly_repl_pieces INTEGER NOT NULL DEFAULT 0,
+    yearly_receiving_plates INTEGER NOT NULL DEFAULT 0,
+    yearly_receiving_pieces INTEGER NOT NULL DEFAULT 0,
+    yearly_pick_plates INTEGER NOT NULL DEFAULT 0,
+    yearly_pick_pieces INTEGER NOT NULL DEFAULT 0,
+    active_days INTEGER NOT NULL DEFAULT 0,
+    active_weeks INTEGER NOT NULL DEFAULT 0,
+    role_confidence TEXT NOT NULL,
+    area_confidence TEXT NOT NULL,
+    review_flag INTEGER NOT NULL DEFAULT 0,
+    role_mix_json TEXT NOT NULL,
+    area_mix_json TEXT NOT NULL,
+    source_summary_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (year, userid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_historical_role_alignment_year_review
+    ON historical_role_alignment (year, review_flag, primary_role);
 """
 
 

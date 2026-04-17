@@ -124,6 +124,12 @@ export default function OptionsPage() {
               href="/options/ingestion"
               buttonLabel="Open Ingestion Status"
             />
+            <SettingsCard
+              title="Historical Role Alignment"
+              description="Review yearly UserLS replenishment role and area alignment."
+              href="/options/historical-role-alignment"
+              buttonLabel="Open Alignment Review"
+            />
           </div>
         </section>
 
