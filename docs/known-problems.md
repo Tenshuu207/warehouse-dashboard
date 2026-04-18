@@ -1,6 +1,3 @@
-cd ~/homelab-stacks/warehouse-dashboard || exit 1
-
-cat > docs/known-problems.md <<'EOF'
 # Known Problems
 
 ## Purpose
@@ -43,24 +40,38 @@ This causes the same operator/date/work to appear differently depending on the p
 
 ---
 
-## 2. Canonical observed-work role buckets are not fully stable yet
+## 2. Canonical observed-work role bucket review is still active
 
-Summary and related views still need a more reliable canonical observed-work role-bucket source.
+Summary uses the canonical observed-work display taxonomy:
+- Receiving
+- FrzFlr
+- FrzMix
+- FrzPIR
+- DryFlr
+- DryMix
+- DryPIR
+- ClrPrdc
+- ClrMeat
+- ClrDairy
+- Unclassified
 
-### Symptoms
-- too much work can land under Mixed / Unclassified
-- cooler work can be hard to split into:
-  - ClrMeat
-  - ClrDairy
-  - Produce
-- receiving may not land in the right handled-work role bucket depending on chart meaning
+FrzLet and FrzPut remain source/raw distinctions but roll into FrzFlr for handled-work display.
+Produce displays as ClrPrdc.
 
-### Why it matters
-Client-side cleanup cannot reliably recover detail once summary data is already collapsed.
+Area detail remains more granular:
+- Freezer keeps FrzPut, FrzLet, FrzMix, and FrzPIR split
+- Dry keeps DryFlr, DryMix, and DryPIR split
+- Cooler uses ClrPrdc, ClrMeat, and ClrDairy
+
+### Remaining symptoms
+- too much work can still land under Unclassified
+- cooler work without a source-supported ClrPrdc, ClrMeat, or ClrDairy split must stay Unclassified
+- receiving without a destination area bucket can still need review
 
 ### Current direction
 - treat this as an upstream truth-model issue, not only a chart issue
 - avoid pretending the client can fully reconstruct role truth from collapsed labels
+- Summary handled-work by role has a dedicated UserLS observed-work bucket payload and source diagnostics, but remaining Unclassified rows still need review and better upstream classification over time
 
 ---
 
@@ -106,6 +117,10 @@ Summary is useful only if the chart is answering the right question.
 - use pies/donuts for composition only
 - use bars for exact comparisons
 - remove weak charts rather than keep misleading ones
+- role handled-work charts should consume canonical observed-work buckets directly, not assigned-role fields or pre-collapsed `roleGroups`
+- Grouped Area Share and Grouped Area Totals should use the same selected basis while keeping value metric separate from work family:
+  - value metric: Plates or Pieces
+  - work family: Replenishment, Receiving, or Total Handled
 
 ---
 
@@ -173,4 +188,3 @@ First ask:
 - is this observed work truth?
 - is this a pre-collapsed summary layer?
 - is the client trying to reconstruct something that should exist upstream?
-EOF

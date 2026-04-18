@@ -16,15 +16,46 @@ import {
 } from "recharts";
 import { useAppState } from "@/lib/app-state";
 import { rangeHref, resolveContextRange } from "@/lib/date-range";
-import {
-  resolveOperationalAreaGroup,
-  resolveRolePerformanceLabel,
-} from "@/lib/area-labels";
 import PageHeader from "./shared/PageHeader";
 import StatCard from "./shared/StatCard";
 
 type TeamGroupsResponse = {
   date: string;
+  observedWorkRoleBuckets: Array<{
+    role: string;
+    operatorCount: number;
+    plates: number;
+    pieces: number;
+    replenishmentPlates: number;
+    replenishmentPieces: number;
+    receivingPlates: number;
+    receivingPieces: number;
+  }>;
+  observedWorkRoleDiagnostics?: {
+    unclassified?: Array<{
+      sourceLabel: string;
+      operatorCount: number;
+      plates: number;
+      pieces: number;
+      sampleOperators: string[];
+    }>;
+    sourceBreakdown?: Array<{
+      role: string;
+      sourceLabel: string;
+      operatorCount: number;
+      plates: number;
+      pieces: number;
+    }>;
+  };
+  groupedAreaWorkBuckets?: Array<{
+    area: string;
+    replenishmentPlates: number;
+    replenishmentPieces: number;
+    receivingPlates: number;
+    receivingPieces: number;
+    totalHandledPlates: number;
+    totalHandledPieces: number;
+  }>;
   teams: Array<{
     team: string;
     operatorCount: number;
@@ -87,8 +118,41 @@ type TeamGroupsResponse = {
 };
 
 type Metric = "Plates" | "Pieces";
+type GroupedAreaMetric =
+  | "replenishmentPlates"
+  | "replenishmentPieces"
+  | "receivingPlates"
+  | "receivingPieces"
+  | "totalHandledPlates"
+  | "totalHandledPieces";
+
+type GroupedAreaWorkFamily = "replenishment" | "receiving" | "totalHandled";
+
+type GroupedAreaWorkFamilyConfig = {
+  key: GroupedAreaWorkFamily;
+  label: string;
+  description: string;
+};
 
 const CHART_COLORS = ["#2563eb", "#0f766e", "#f97316", "#7c3aed", "#0891b2", "#475569"];
+const GROUPED_AREA_ORDER = ["Dry", "Cooler", "Freezer", "Unclassified"] as const;
+const GROUPED_AREA_WORK_FAMILIES: GroupedAreaWorkFamilyConfig[] = [
+  {
+    key: "replenishment",
+    label: "Replenishment",
+    description: "Replenishment work by observed grouped area.",
+  },
+  {
+    key: "receiving",
+    label: "Receiving",
+    description: "Receiving work by destination grouped area.",
+  },
+  {
+    key: "totalHandled",
+    label: "Total Handled",
+    description: "Replenishment plus receiving work by grouped area.",
+  },
+];
 
 function fmt(value: number | null | undefined) {
   return Number(value || 0).toLocaleString();
@@ -116,6 +180,19 @@ function metricValue(record: { Plates: number; Pieces: number }, metric: Metric)
   return metric === "Plates" ? record.Plates : record.Pieces;
 }
 
+function groupedAreaMetricKey(
+  family: GroupedAreaWorkFamily,
+  metric: Metric
+): GroupedAreaMetric {
+  if (family === "replenishment") {
+    return metric === "Plates" ? "replenishmentPlates" : "replenishmentPieces";
+  }
+  if (family === "receiving") {
+    return metric === "Plates" ? "receivingPlates" : "receivingPieces";
+  }
+  return metric === "Plates" ? "totalHandledPlates" : "totalHandledPieces";
+}
+
 function normalizeToken(value: unknown) {
   return String(value || "")
     .trim()
@@ -136,33 +213,6 @@ function activityValue(record: Record<string, unknown>, activity: string, unit: 
     `restockLike${unit}Estimated`,
     `restockLike${unit}`
   );
-}
-
-function groupedAreaLabel(value: unknown) {
-  const group = resolveOperationalAreaGroup(value);
-  if (group?.label === "Dry" || group?.label === "Cooler" || group?.label === "Freezer") {
-    return group.label;
-  }
-
-  const token = normalizeToken(value);
-  if (!token) return null;
-  if (token.startsWith("1") || token.startsWith("5") || token.includes("dry")) return "Dry";
-  if (
-    token.startsWith("2") ||
-    token.startsWith("3") ||
-    token.startsWith("4") ||
-    token.includes("cooler") ||
-    token.includes("produce") ||
-    token.includes("chicken") ||
-    token.includes("icedproduct")
-  ) {
-    return "Cooler";
-  }
-  if (token.startsWith("6") || token.startsWith("7") || token.startsWith("frz") || token.includes("freezer")) {
-    return "Freezer";
-  }
-
-  return null;
 }
 
 function receivingDestinationLabel(value: unknown) {
@@ -193,36 +243,6 @@ function receivingDestinationLabel(value: unknown) {
   if (raw === "4" || token.startsWith("4") || token.includes("produce")) return "Produce";
 
   return null;
-}
-
-function groupedDestinationLabel(value: unknown) {
-  const destination = receivingDestinationLabel(value);
-  return groupedAreaLabel(destination || value);
-}
-
-function rolePerformanceCandidates(
-  operator: TeamGroupsResponse["teams"][number]["operators"][number]
-) {
-  return [
-    operator.reviewAssignedRoleOverride,
-    operator.effectiveAssignedRole,
-    operator.assignedRole,
-    operator.rawAssignedRole,
-    operator.currentRole,
-    operator.roleGroup,
-    operator.observedRole,
-  ];
-}
-
-function operatorRolePerformanceLabel(
-  operator: TeamGroupsResponse["teams"][number]["operators"][number]
-) {
-  for (const candidate of rolePerformanceCandidates(operator)) {
-    const label = resolveRolePerformanceLabel(candidate);
-    if (label) return label;
-  }
-
-  return "Mixed/Other";
 }
 
 function addMixShare(grouped: Map<string, number>, areaValue: unknown, weightValue: unknown = 1) {
@@ -397,12 +417,41 @@ function MetricToggle({
   );
 }
 
+function GroupedAreaFamilyToggle({
+  value,
+  onChange,
+}: {
+  value: GroupedAreaWorkFamily;
+  onChange: (family: GroupedAreaWorkFamily) => void;
+}) {
+  return (
+    <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+      {GROUPED_AREA_WORK_FAMILIES.map((option) => (
+        <button
+          key={option.key}
+          type="button"
+          onClick={() => onChange(option.key)}
+          className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+            value === option.key
+              ? "bg-slate-900 text-white shadow-sm"
+              : "text-slate-600 hover:bg-white hover:text-slate-900"
+          }`}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function OverviewEnrichedCore() {
   const { selectedWeek } = useAppState();
   const [data, setData] = useState<TeamGroupsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [metric, setMetric] = useState<Metric>("Plates");
+  const [groupedAreaFamily, setGroupedAreaFamily] =
+    useState<GroupedAreaWorkFamily>("totalHandled");
   const range = resolveContextRange(selectedWeek, null);
 
   useEffect(() => {
@@ -498,114 +547,77 @@ export default function OverviewEnrichedCore() {
   );
 
   const groupedAreaTotals = useMemo(() => {
-    const grouped = new Map<
-      string,
-      {
-        area: string;
-        ReplenishmentPlates: number;
-        ReplenishmentPieces: number;
-        ReceivingPlates: number;
-        ReceivingPieces: number;
-        Plates: number;
-        Pieces: number;
-      }
-    >();
+    const grouped = new Map(
+      GROUPED_AREA_ORDER.map((area) => [
+        area,
+        {
+          area,
+          replenishmentPlates: 0,
+          replenishmentPieces: 0,
+          receivingPlates: 0,
+          receivingPieces: 0,
+          totalHandledPlates: 0,
+          totalHandledPieces: 0,
+        },
+      ])
+    );
 
-    for (const label of ["Dry", "Cooler", "Freezer"]) {
-      grouped.set(label, {
-        area: label,
-        ReplenishmentPlates: 0,
-        ReplenishmentPieces: 0,
-        ReceivingPlates: 0,
-        ReceivingPieces: 0,
-        Plates: 0,
-        Pieces: 0,
+    for (const row of data?.groupedAreaWorkBuckets || []) {
+      const area = GROUPED_AREA_ORDER.includes(row.area as (typeof GROUPED_AREA_ORDER)[number])
+        ? (row.area as (typeof GROUPED_AREA_ORDER)[number])
+        : "Unclassified";
+      grouped.set(area, {
+        area,
+        replenishmentPlates: Number(row.replenishmentPlates || 0),
+        replenishmentPieces: Number(row.replenishmentPieces || 0),
+        receivingPlates: Number(row.receivingPlates || 0),
+        receivingPieces: Number(row.receivingPieces || 0),
+        totalHandledPlates: Number(row.totalHandledPlates || 0),
+        totalHandledPieces: Number(row.totalHandledPieces || 0),
       });
     }
 
-    for (const team of data?.teams || []) {
-      for (const op of team.operators || []) {
-        const fallbackArea =
-          groupedAreaLabel(op.observedArea) ||
-          groupedAreaLabel(op.officialTeam) ||
-          groupedAreaLabel(team.team);
-
-        if (fallbackArea) {
-          const row = grouped.get(fallbackArea)!;
-          row.ReplenishmentPlates += Number(op.replenishmentPlates || 0);
-          row.ReplenishmentPieces += Number(op.replenishmentPieces || 0);
-          row.Plates += Number(op.replenishmentPlates || 0);
-          row.Pieces += Number(op.replenishmentPieces || 0);
-        }
-
-        const receivingPlates = Number(op.receivingPlates || 0);
-        const receivingPieces = Number(op.receivingPieces || 0);
-        if (!receivingPlates && !receivingPieces) continue;
-
-        const mix = parseReceivingMix(op.receivingMix);
-
-        if (mix.length > 0) {
-          const plateSplits = splitByMix(receivingPlates, mix);
-          const pieceSplits = splitByMix(receivingPieces, mix);
-
-          for (const [destination, plates] of plateSplits) {
-            const area = groupedDestinationLabel(destination);
-            if (!area) continue;
-
-            const row = grouped.get(area)!;
-            row.ReceivingPlates += plates;
-            row.Plates += plates;
-          }
-
-          for (const [destination, pieces] of pieceSplits) {
-            const area = groupedDestinationLabel(destination);
-            if (!area) continue;
-
-            const row = grouped.get(area)!;
-            row.ReceivingPieces += pieces;
-            row.Pieces += pieces;
-          }
-
-          continue;
-        }
-
-        if (!fallbackArea) continue;
-
-        const row = grouped.get(fallbackArea)!;
-        row.ReceivingPlates += receivingPlates;
-        row.ReceivingPieces += receivingPieces;
-        row.Plates += receivingPlates;
-        row.Pieces += receivingPieces;
-      }
-    }
-
-    return [...grouped.values()];
+    return GROUPED_AREA_ORDER.map((area) => grouped.get(area)!).filter((row) => {
+      return (
+        row.area !== "Unclassified" ||
+        row.replenishmentPlates > 0 ||
+        row.replenishmentPieces > 0 ||
+        row.receivingPlates > 0 ||
+        row.receivingPieces > 0
+      );
+    });
   }, [data]);
+
+  const groupedAreaFamilyConfig = useMemo(
+    () =>
+      GROUPED_AREA_WORK_FAMILIES.find((option) => option.key === groupedAreaFamily) ||
+      GROUPED_AREA_WORK_FAMILIES[0],
+    [groupedAreaFamily]
+  );
+
+  const groupedAreaMetric = useMemo(
+    () => groupedAreaMetricKey(groupedAreaFamily, metric),
+    [groupedAreaFamily, metric]
+  );
 
   const groupedAreaComparison = useMemo(
     () =>
       groupedAreaTotals.map((row) => ({
         area: row.area,
-        Replenishment: metric === "Plates" ? row.ReplenishmentPlates : row.ReplenishmentPieces,
-        Receiving: metric === "Plates" ? row.ReceivingPlates : row.ReceivingPieces,
+        value: row[groupedAreaMetric],
       })),
-    [groupedAreaTotals, metric]
+    [groupedAreaMetric, groupedAreaTotals]
   );
 
   const groupedAreaShare = useMemo(
     () =>
-      groupedAreaTotals
-        .map((row) => ({
-          name: row.area,
-          value: metricValue(row, metric),
-        }))
+      groupedAreaComparison
+        .map((row) => ({ name: row.area, value: row.value }))
         .filter((row) => row.value > 0),
-    [groupedAreaTotals, metric]
+    [groupedAreaComparison]
   );
 
-  const hasGroupedAreaComparison = groupedAreaComparison.some(
-    (row) => row.Replenishment > 0 || row.Receiving > 0
-  );
+  const hasGroupedAreaComparison = groupedAreaComparison.some((row) => row.value > 0);
 
   const receivingByDestination = useMemo(() => {
     const destinations = ["Freezer", "Freezer PIR", "Dry", "Dry PIR", "Cooler", "Produce"];
@@ -669,32 +681,10 @@ export default function OverviewEnrichedCore() {
   );
 
   const rolePerformance = useMemo(() => {
-    const grouped = new Map<
-      string,
-      {
-        role: string;
-        Plates: number;
-        Pieces: number;
-      }
-    >();
-
-    for (const team of data?.teams || []) {
-      for (const operator of team.operators || []) {
-        const label = operatorRolePerformanceLabel(operator);
-        const row = grouped.get(label) || {
-          role: label,
-          Plates: 0,
-          Pieces: 0,
-        };
-
-        row.Plates += Number(operator.replenishmentPlates || 0);
-        row.Pieces += Number(operator.replenishmentPieces || 0);
-        grouped.set(label, row);
-      }
-    }
-
-    const sorted = [...grouped.values()].sort((a, b) => {
-      const metricDiff = metricValue(b, metric) - metricValue(a, metric);
+    const sorted = [...(data?.observedWorkRoleBuckets || [])].sort((a, b) => {
+      const metricDiff =
+        (metric === "Plates" ? Number(b.plates || 0) : Number(b.pieces || 0)) -
+        (metric === "Plates" ? Number(a.plates || 0) : Number(a.pieces || 0));
       if (metricDiff !== 0) return metricDiff;
       return a.role.localeCompare(b.role);
     });
@@ -702,70 +692,55 @@ export default function OverviewEnrichedCore() {
     return sorted
       .map((row) => ({
         role: row.role,
-        value: metricValue(row, metric),
+        value: metric === "Plates" ? Number(row.plates || 0) : Number(row.pieces || 0),
       }))
       .filter((row) => row.value > 0)
-      .slice(0, 8);
-  }, [data, metric]);
-
-  const rolePerformanceMixedDiagnostics = useMemo(() => {
-    const grouped = new Map<
-      string,
-      { label: string; Plates: number; Pieces: number; count: number; operators: string[] }
-    >();
-
-    for (const team of data?.teams || []) {
-      for (const operator of team.operators || []) {
-        if (operatorRolePerformanceLabel(operator) !== "Mixed/Other") continue;
-
-        const replenishment = {
-          Plates: Number(operator.replenishmentPlates || 0),
-          Pieces: Number(operator.replenishmentPieces || 0),
-        };
-
-        if (metricValue(replenishment, metric) <= 0) continue;
-
-        const candidateLabel =
-          rolePerformanceCandidates(operator)
-            .map((value) => String(value || "").trim())
-            .filter(Boolean)
-            .join(" | ") || "(blank)";
-
-        const label = `${team.team || "Unknown team"}: ${candidateLabel}`;
-        const row = grouped.get(label) || {
-          label,
-          Plates: 0,
-          Pieces: 0,
-          count: 0,
-          operators: [],
-        };
-
-        row.Plates += replenishment.Plates;
-        row.Pieces += replenishment.Pieces;
-        row.count += 1;
-        if (row.operators.length < 6) {
-          row.operators.push(operator.name || operator.userid);
-        }
-        grouped.set(label, row);
-      }
-    }
-
-    return [...grouped.values()]
-      .filter((row) => metricValue(row, metric) > 0)
-      .sort((a, b) => metricValue(b, metric) - metricValue(a, metric))
       .slice(0, 12);
   }, [data, metric]);
 
+  const observedWorkUnclassifiedDiagnostics = useMemo(() => {
+    return [...(data?.observedWorkRoleDiagnostics?.unclassified || [])].filter((row) => {
+      return (metric === "Plates" ? Number(row.plates || 0) : Number(row.pieces || 0)) > 0;
+    });
+  }, [data, metric]);
+
+  const observedWorkSourceDiagnostics = useMemo(() => {
+    return [...(data?.observedWorkRoleDiagnostics?.sourceBreakdown || [])].filter((row) => {
+      return (
+        row.role === "FrzFlr" ||
+        row.role === "ClrPrdc" ||
+        row.role === "Unclassified"
+      );
+    });
+  }, [data]);
+
   useEffect(() => {
-    if (process.env.NODE_ENV !== "development" || rolePerformanceMixedDiagnostics.length === 0) {
+    if (
+      process.env.NODE_ENV !== "development" ||
+      observedWorkUnclassifiedDiagnostics.length === 0
+    ) {
       return;
     }
 
     console.info(
-      "[warehouse-dashboard] Role Performance Mixed/Other diagnostics",
-      rolePerformanceMixedDiagnostics
+      "[warehouse-dashboard] Observed-work Unclassified diagnostics",
+      observedWorkUnclassifiedDiagnostics
     );
-  }, [rolePerformanceMixedDiagnostics]);
+  }, [observedWorkUnclassifiedDiagnostics]);
+
+  useEffect(() => {
+    if (
+      process.env.NODE_ENV !== "development" ||
+      observedWorkSourceDiagnostics.length === 0
+    ) {
+      return;
+    }
+
+    console.info(
+      "[warehouse-dashboard] Observed-work canonical source diagnostics",
+      observedWorkSourceDiagnostics
+    );
+  }, [observedWorkSourceDiagnostics]);
 
   if (loading) {
     return (
@@ -805,10 +780,20 @@ export default function OverviewEnrichedCore() {
         <div>
           <div className="text-sm font-semibold text-slate-900">Metric</div>
           <p className="mt-1 text-xs text-slate-500">
-            Applies to activity, area, receiving, and role performance charts.
+            Plates/Pieces controls the numeric value shown in every chart.
           </p>
         </div>
         <MetricToggle metric={metric} onChange={setMetric} />
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+        <div>
+          <div className="text-sm font-semibold text-slate-900">Grouped Area Work Family</div>
+          <p className="mt-1 text-xs text-slate-500">
+            Share and totals use the selected work family. Values follow the Plates/Pieces toggle.
+          </p>
+        </div>
+        <GroupedAreaFamilyToggle value={groupedAreaFamily} onChange={setGroupedAreaFamily} />
       </div>
 
       <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
@@ -849,7 +834,7 @@ export default function OverviewEnrichedCore() {
         {groupedAreaShare.length > 0 ? (
           <ChartPanel
             title="Grouped Area Share"
-            description={`${metric} share across Dry, Cooler, and Freezer including replenishment and receiving.`}
+            description={`${groupedAreaFamilyConfig.label} ${metric.toLowerCase()} share across grouped operational areas.`}
           >
             <ChartFrame height={320}>
               {({ width, height }) => (
@@ -880,7 +865,7 @@ export default function OverviewEnrichedCore() {
         {hasGroupedAreaComparison ? (
           <ChartPanel
             title="Grouped Area Totals"
-            description={`Dry, Cooler, and Freezer ${metric.toLowerCase()} by replenishment vs receiving.`}
+            description={`${groupedAreaFamilyConfig.label} ${metric.toLowerCase()} totals using the same basis as Grouped Area Share.`}
             footer={
               <div className="flex flex-wrap gap-2">
                 {groupedAreaComparison.map((row) => (
@@ -908,8 +893,12 @@ export default function OverviewEnrichedCore() {
                   <YAxis tickFormatter={chartFmt} tickLine={false} axisLine={false} width={72} />
                   <Tooltip formatter={(value: unknown) => chartFmt(value)} />
                   <Legend />
-                  <Bar dataKey="Replenishment" fill="#0f766e" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="Receiving" fill="#f97316" radius={[6, 6, 0, 0]} />
+                  <Bar
+                    dataKey="value"
+                    name={`${groupedAreaFamilyConfig.label} ${metric}`}
+                    fill="#0f766e"
+                    radius={[6, 6, 0, 0]}
+                  />
                 </BarChart>
               )}
             </ChartFrame>
@@ -950,8 +939,8 @@ export default function OverviewEnrichedCore() {
 
         {rolePerformance.length > 0 ? (
           <ChartPanel
-            title="Role Performance"
-            description={`Top assignment-aligned role buckets by replenishment ${metric.toLowerCase()}. Unclassified operators are grouped into Mixed/Other.`}
+            title="Handled Work by Role"
+            description={`Canonical observed-work role buckets by handled ${metric.toLowerCase()}, including receiving.`}
           >
             <ChartFrame height={360}>
               {({ width, height }) => (
@@ -967,7 +956,7 @@ export default function OverviewEnrichedCore() {
                   <YAxis type="category" dataKey="role" tickLine={false} axisLine={false} width={120} />
                   <Tooltip formatter={(value: unknown) => chartFmt(value)} />
                   <Legend />
-                  <Bar dataKey="value" name={`Replenishment ${metric}`} fill="#334155" radius={[0, 6, 6, 0]} />
+                  <Bar dataKey="value" name={metric} fill="#334155" radius={[0, 6, 6, 0]} />
                 </BarChart>
               )}
             </ChartFrame>

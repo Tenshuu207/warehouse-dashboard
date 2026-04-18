@@ -18,12 +18,12 @@ const AREA_IDENTITIES: AreaIdentity[] = [
   {
     key: "3",
     label: "Cooler",
-    aliases: ["3", "cooler", "clrmeat", "clrdairy"],
+    aliases: ["3", "cooler", "clrmeat", "clrdairy", "clrprdc"],
   },
   {
     key: "4",
     label: "Produce",
-    aliases: ["4", "produce", "produce cooler"],
+    aliases: ["4", "produce", "produce cooler", "clrprdc"],
   },
   {
     key: "5",
@@ -51,8 +51,8 @@ export type OperationalAreaGroup = {
 
 const OPERATIONAL_AREA_GROUP_NATIVE_ROLE_LABELS: Record<string, string[]> = {
   dry: ["DryFlr", "DryMix", "DryPIR"],
-  cooler: ["ClrDairy", "ClrMeat", "Produce"],
-  freezer: ["FrzLet", "FrzMix", "FrzPIR", "FrzPut"],
+  cooler: ["ClrDairy", "ClrMeat", "Produce", "ClrPrdc"],
+  freezer: ["FrzLet", "FrzMix", "FrzPIR", "FrzPut", "FrzFlr"],
 };
 
 const OPERATIONAL_AREA_GROUPS: OperationalAreaGroup[] = [
@@ -66,15 +66,49 @@ const OPERATIONAL_AREA_GROUPS: OperationalAreaGroup[] = [
     key: "cooler",
     label: "Cooler",
     leafAreaCodes: ["2", "3", "4"],
-    aliases: ["cooler", "chicken/iced product", "chicken iced product", "produce"],
+    aliases: ["cooler", "chicken/iced product", "chicken iced product", "produce", "clrprdc"],
   },
   {
     key: "freezer",
     label: "Freezer",
     leafAreaCodes: ["6", "7"],
-    aliases: ["freezer", "freezer floor", "freezer pir", "frzlet", "frzmix", "frzput"],
+    aliases: ["freezer", "freezer floor", "freezer pir", "frzflr", "frzlet", "frzmix", "frzput"],
   },
 ];
+
+export const CANONICAL_OBSERVED_WORK_ROLE_ORDER = [
+  "Receiving",
+  "FrzFlr",
+  "FrzMix",
+  "FrzPIR",
+  "DryFlr",
+  "DryMix",
+  "DryPIR",
+  "ClrPrdc",
+  "ClrMeat",
+  "ClrDairy",
+  "Unclassified",
+] as const;
+
+export type CanonicalObservedWorkRole =
+  (typeof CANONICAL_OBSERVED_WORK_ROLE_ORDER)[number];
+
+export const AREA_DETAIL_OBSERVED_ROLE_ORDER = [
+  "FrzPut",
+  "FrzLet",
+  "FrzMix",
+  "FrzPIR",
+  "DryFlr",
+  "DryMix",
+  "DryPIR",
+  "ClrPrdc",
+  "ClrMeat",
+  "ClrDairy",
+  "Unclassified",
+] as const;
+
+export type AreaDetailObservedRole =
+  (typeof AREA_DETAIL_OBSERVED_ROLE_ORDER)[number];
 
 function normalizeAreaToken(value: unknown) {
   return String(value || "")
@@ -195,6 +229,113 @@ export function operationalAreaGroupHasNativeRoleLabel(groupKey: string, roleLab
   const normalized = String(roleLabel || "").trim();
   if (!normalized) return false;
   return operationalAreaGroupNativeRoleLabels(groupKey).includes(normalized);
+}
+
+export function resolveCanonicalObservedWorkRoleLabel(
+  value: unknown
+): CanonicalObservedWorkRole {
+  const raw = String(value || "").trim();
+  const compact = raw.toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+  if (
+    !compact ||
+    compact === "mixed" ||
+    compact === "other" ||
+    compact === "unknown" ||
+    compact === "extra" ||
+    compact === "unclassified"
+  ) {
+    return "Unclassified";
+  }
+
+  if (
+    compact === "receiving" ||
+    compact === "frzrcv" ||
+    compact === "clrrcv" ||
+    compact === "dryrcv" ||
+    compact === "mixrcv" ||
+    compact.includes("receiving")
+  ) {
+    return "Receiving";
+  }
+
+  if (
+    compact === "frzflr" ||
+    compact === "freezerfloor" ||
+    compact === "freezerflr" ||
+    compact === "frzput" ||
+    compact === "frzlet" ||
+    compact === "freezerput" ||
+    compact === "freezerlet" ||
+    compact === "freezerputaway" ||
+    compact === "freezerletdown"
+  ) {
+    return "FrzFlr";
+  }
+  if (compact === "frzmix" || compact === "freezermix") return "FrzMix";
+  if (compact === "frzpir" || compact === "freezerpir" || compact === "7") return "FrzPIR";
+
+  if (compact === "dryflr" || compact === "dryfloor") return "DryFlr";
+  if (compact === "drymix") return "DryMix";
+  if (compact === "drypir" || compact === "5") return "DryPIR";
+
+  if (
+    compact === "clrprdc" ||
+    compact === "coolerproduce" ||
+    compact === "produce" ||
+    compact === "producecooler" ||
+    compact === "4"
+  ) {
+    return "ClrPrdc";
+  }
+  if (compact === "clrmeat" || compact === "coolermeat") return "ClrMeat";
+  if (compact === "clrdairy" || compact === "coolerdairy") return "ClrDairy";
+
+  return "Unclassified";
+}
+
+export function resolveAreaDetailObservedRoleLabel(value: unknown): AreaDetailObservedRole {
+  const raw = String(value || "").trim();
+  const compact = raw.toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+  if (
+    !compact ||
+    compact === "mixed" ||
+    compact === "other" ||
+    compact === "unknown" ||
+    compact === "extra" ||
+    compact === "unclassified" ||
+    compact.includes("receiving")
+  ) {
+    return "Unclassified";
+  }
+
+  if (compact === "frzput" || compact === "freezerput" || compact === "freezerputaway") {
+    return "FrzPut";
+  }
+  if (compact === "frzlet" || compact === "freezerlet" || compact === "freezerletdown") {
+    return "FrzLet";
+  }
+  if (compact === "frzmix" || compact === "freezermix") return "FrzMix";
+  if (compact === "frzpir" || compact === "freezerpir" || compact === "7") return "FrzPIR";
+
+  if (compact === "dryflr" || compact === "dryfloor") return "DryFlr";
+  if (compact === "drymix") return "DryMix";
+  if (compact === "drypir" || compact === "5") return "DryPIR";
+
+  if (
+    compact === "clrprdc" ||
+    compact === "coolerproduce" ||
+    compact === "produce" ||
+    compact === "producecooler" ||
+    compact === "4"
+  ) {
+    return "ClrPrdc";
+  }
+  if (compact === "clrmeat" || compact === "coolermeat") return "ClrMeat";
+  if (compact === "clrdairy" || compact === "coolerdairy") return "ClrDairy";
+
+  return "Unclassified";
 }
 
 export function resolveAssignedAreaLabel(value: unknown): string | null {

@@ -4,6 +4,10 @@ import Link from "next/link";
 import { Fragment, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { rangeHref, type DateRange } from "@/lib/date-range";
+import {
+  AREA_DETAIL_OBSERVED_ROLE_ORDER,
+  resolveAreaDetailObservedRoleLabel,
+} from "@/lib/area-labels";
 
 type AreaMetrics = {
   letdownPlates: number;
@@ -80,6 +84,66 @@ function emptyMetrics(): AreaMetrics {
     totalPieces: 0,
     avgPcsPerPlate: 0,
   };
+}
+
+const ROLE_DISPLAY_ORDER = new Map(
+  AREA_DETAIL_OBSERVED_ROLE_ORDER.map((role, index) => [role, index])
+);
+
+function areaDetailRoleLabel(label: string) {
+  if (label === "Outside Help") return label;
+  return resolveAreaDetailObservedRoleLabel(label);
+}
+
+function addRoleMetrics(target: AreaRoleRow, source: AreaRoleRow) {
+  target.letdownPlates += source.letdownPlates;
+  target.letdownPieces += source.letdownPieces;
+  target.putawayPlates += source.putawayPlates;
+  target.putawayPieces += source.putawayPieces;
+  target.restockPlates += source.restockPlates;
+  target.restockPieces += source.restockPieces;
+  target.bulkMovePlates += source.bulkMovePlates;
+  target.bulkMovePieces += source.bulkMovePieces;
+  target.totalPlates += source.totalPlates;
+  target.totalPieces += source.totalPieces;
+  target.avgPcsPerPlate = target.totalPlates
+    ? Number((target.totalPieces / target.totalPlates).toFixed(0))
+    : 0;
+}
+
+function aggregateAreaDetailRoles(rows: AreaRoleRow[]) {
+  const grouped = new Map<string, AreaRoleRow>();
+
+  for (const row of rows) {
+    const label = areaDetailRoleLabel(row.label);
+    const current =
+      grouped.get(label) || {
+        label,
+        employeeCount: 0,
+        ...emptyMetrics(),
+        contributors: row.label === "Outside Help" ? row.contributors : undefined,
+      };
+
+    current.employeeCount += row.employeeCount;
+    if (row.label === "Outside Help") current.contributors = row.contributors;
+    addRoleMetrics(current, row);
+    grouped.set(label, current);
+  }
+
+  return [...grouped.values()].sort((a, b) => {
+    if (a.label === "Outside Help" && b.label !== "Outside Help") return 1;
+    if (b.label === "Outside Help" && a.label !== "Outside Help") return -1;
+
+    const aOrder = ROLE_DISPLAY_ORDER.get(a.label as (typeof AREA_DETAIL_OBSERVED_ROLE_ORDER)[number]);
+    const bOrder = ROLE_DISPLAY_ORDER.get(b.label as (typeof AREA_DETAIL_OBSERVED_ROLE_ORDER)[number]);
+    if (aOrder !== undefined || bOrder !== undefined) {
+      return (aOrder ?? 999) - (bOrder ?? 999);
+    }
+
+    const diff = b.totalPieces - a.totalPieces;
+    if (diff !== 0) return diff;
+    return a.label.localeCompare(b.label);
+  });
 }
 
 function SectionHeader({
@@ -652,6 +716,7 @@ export default function AreaSheetView({
     },
     { label: "Total", plates: payload.totals.totalPlates, pieces: payload.totals.totalPieces },
   ];
+  const displayRoleRows = aggregateAreaDetailRoles(payload.roles);
 
   return (
     <div className="space-y-4">
@@ -663,7 +728,7 @@ export default function AreaSheetView({
             <div className="text-right text-xs text-slate-500">
               <div>{payload.assignedEmployeeCount} assigned employees</div>
               <div>{payload.receivingCount} receiving rows</div>
-              <div>{payload.roleCount} roles</div>
+              <div>{displayRoleRows.length} roles</div>
             </div>
           }
         />
@@ -691,7 +756,8 @@ export default function AreaSheetView({
           </div>
           <div className="rounded-xl border bg-slate-50 p-3 text-center">
             <div className="text-[11px] uppercase tracking-wide text-slate-500">Roles</div>
-            <div className="mt-2 text-2xl font-semibold">{fmt(payload.roleCount)}</div>
+            <div className="mt-2 text-2xl font-semibold">{fmt(displayRoleRows.length)}</div>
+            <div className="mt-1 text-[11px] text-slate-500">area detail</div>
           </div>
         </div>
 
@@ -757,9 +823,9 @@ export default function AreaSheetView({
 
       <RoleTable
         title={`${payload.areaLabel} Observed Roles`}
-        subtitle="Observed grouped-area role buckets only."
+        subtitle="Observed grouped-area role buckets with area-level drilldown detail."
         range={range}
-        rows={payload.roles}
+        rows={displayRoleRows}
       />
     </div>
   );

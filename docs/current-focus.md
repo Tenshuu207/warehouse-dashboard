@@ -1,8 +1,3 @@
-cd ~/homelab-stacks/warehouse-dashboard || exit 1
-
-mkdir -p docs
-
-cat > docs/current-focus.md <<'EOF'
 # Current Focus
 
 ## Purpose
@@ -70,9 +65,13 @@ These should be treated as settled unless intentionally revisited:
   - Cooler
   - Freezer
 - Cooler work-role buckets remain:
+  - ClrPrdc
   - ClrMeat
   - ClrDairy
-  - Produce
+- Freezer floor source roles FrzLet and FrzPut remain raw/source distinctions.
+- Summary handled-work display rolls FrzLet and FrzPut into FrzFlr.
+- Area detail keeps freezer observed roles split as FrzPut, FrzLet, FrzMix, and FrzPIR.
+- Produce displays as ClrPrdc in canonical handled-work views.
 - Unresolved role work should prefer **Unclassified**, not Mixed/Other as a casual default.
 
 ---
@@ -114,6 +113,23 @@ Should show:
 
 ---
 
+## Current Implementation Note
+
+Summary handled-work by role now consumes canonical observed-work role buckets exposed by the UserLS team-groups path.
+
+Those buckets are not assigned placement truth and should not be used for hours-based performance evaluation.
+They include Receiving as a first-class bucket and support FrzFlr, FrzMix, FrzPIR, DryFlr, DryMix, DryPIR, ClrPrdc, ClrMeat, and ClrDairy.
+FrzLet and FrzPut remain available as source diagnostics but roll into FrzFlr for display.
+Unresolved handled work should remain Unclassified for review.
+
+Grouped Area Share and Grouped Area Totals now share the same Summary basis, controlled by:
+- value metric: Plates or Pieces
+- grouped-area work family: Replenishment, Receiving, or Total Handled
+
+Area detail remains more granular than Summary and should preserve useful source role distinctions for drilldown.
+
+---
+
 ## Active Guardrails
 
 Do not casually:
@@ -133,4 +149,3 @@ Before starting work, ask:
 - Is this solving a root problem or a symptom?
 - Is this assigned placement truth or observed work truth?
 - Is now the right time to build the Assignment Editor, or does truth resolution need more cleanup first?
-EOF

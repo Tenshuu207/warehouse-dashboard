@@ -74,6 +74,11 @@ Grouped area drilldowns should show:
 - receiving by destination
 - observed roles / outside help where appropriate
 
+Area detail is intentionally more granular than Summary.
+Freezer observed roles should preserve FrzPut, FrzLet, FrzMix, and FrzPIR instead of rolling freezer floor into FrzFlr.
+Dry should preserve DryFlr, DryMix, and DryPIR.
+Cooler should display ClrPrdc, ClrMeat, and ClrDairy.
+
 ### Sheet view direction
 Sheet view should remain:
 - operational
@@ -88,6 +93,25 @@ Summary view should remain:
 - chart-first
 - comparison-focused
 - clearly different from Sheet view
+
+### Summary handled-work role buckets
+Summary handled-work by role should use canonical observed-work buckets from the UserLS team-groups path.
+
+Those buckets are separate from assigned placement and legacy pre-collapsed `roleGroups`.
+They currently support Receiving, FrzFlr, FrzMix, FrzPIR, DryFlr, DryMix, DryPIR, ClrPrdc, ClrMeat, and ClrDairy, with Unclassified reserved for work that cannot be cleanly mapped.
+
+FrzLet and FrzPut remain meaningful source/raw distinctions, but Summary handled-work display rolls them into FrzFlr.
+Produce displays as ClrPrdc in canonical handled-work views.
+
+### Grouped area Summary metrics
+Grouped Area Share and Grouped Area Totals should use the same explicit selected basis.
+
+Summary controls should keep these concepts separate:
+- value metric: Plates or Pieces
+- grouped-area work family: Replenishment, Receiving, or Total Handled
+
+Receiving area contribution should come from destination area buckets when available.
+Unresolved receiving destination work should remain visibly Unclassified rather than guessed into a cooler/freezer/dry subrole.
 
 ---
 
@@ -106,8 +130,13 @@ The project still has multiple role systems in play:
 This is the main remaining conceptual risk.
 
 ### 2. Canonical observed-work role buckets
-Summary and some other views still need a cleaner canonical observed-work role-bucket source.
-This is a deeper project issue than a single-chart bug.
+Summary display now has a cleaner canonical observed-work display taxonomy.
+Area detail remains the deeper operational drilldown and should preserve source role distinctions where useful.
+
+Remaining work is mostly review and diagnostics:
+- reduce remaining Unclassified inputs
+- keep source/raw role distinctions visible for debugging
+- avoid treating display buckets as assigned placement truth
 
 ### 3. Assignment override workflow
 The Assignment Editor does not exist yet.

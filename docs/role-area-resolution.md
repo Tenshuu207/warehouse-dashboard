@@ -123,16 +123,20 @@ It should remain visible as its own work type and its own role family.
 
 ### Freezer Role Family
 
-Canonical freezer work-role buckets:
+Canonical freezer handled-work display buckets:
 
-- FrzPut
-- FrzLet
+- FrzFlr
 - FrzMix
 - FrzPIR
 
+FrzPut and FrzLet remain meaningful source/raw distinctions.
+For Summary handled-work reporting, they roll up to FrzFlr.
+For area detail, they remain split as FrzPut and FrzLet to preserve drilldown depth.
+Diagnostics should keep enough source detail to distinguish FrzPut from FrzLet when reviewing raw inputs.
+
 ### Dry Role Family
 
-Canonical dry work-role buckets:
+Canonical dry handled-work display buckets:
 
 - DryFlr
 - DryMix
@@ -140,14 +144,15 @@ Canonical dry work-role buckets:
 
 ### Cooler Role Family
 
-Canonical cooler work-role buckets:
+Canonical cooler handled-work display buckets:
 
+- ClrPrdc
 - ClrMeat
 - ClrDairy
-- Produce
 
 Important:
-Produce remains part of the Cooler area group, but still stays distinct as a canonical work-role bucket where role-level work classification is needed.
+Produce remains part of the Cooler area group, but displays as ClrPrdc in canonical handled-work views.
+If a source only says Cooler and does not identify ClrPrdc, ClrMeat, or ClrDairy, role-level handled-work reporting should use Unclassified rather than guessing.
 
 ---
 
@@ -279,9 +284,9 @@ Cooler work should not stop at the label “Cooler” if the view is supposed to
 
 When role-level work is intended, the preferred role buckets are:
 
+- ClrPrdc
 - ClrMeat
 - ClrDairy
-- Produce
 
 If the system only knows that work belonged to Cooler but cannot confidently split those three, it should prefer:
 
@@ -289,6 +294,48 @@ If the system only knows that work belonged to Cooler but cannot confidently spl
 - Unclassified for role-level reporting if a specific cooler role cannot be trusted
 
 Do not pretend the system knows the exact cooler subrole when it does not.
+
+---
+
+## Grouped Area Metric Semantics
+
+Grouped Area Share and Grouped Area Totals must use the same explicit metric basis.
+
+Summary controls should keep two choices separate:
+- value metric: Plates or Pieces
+- grouped-area work family: Replenishment, Receiving, or Total Handled
+
+Share is the composition of the selected value metric and work family across grouped operational areas.
+Totals is the absolute grouped-area total for that same selected value metric and work family.
+
+Receiving contribution should use destination area buckets where available.
+If receiving destination cannot be resolved to Dry, Cooler, or Freezer, it should remain visibly Unclassified instead of being guessed from assigned placement.
+
+---
+
+## Summary vs Area Detail Granularity
+
+Summary is the high-level comparison layer.
+It may use the cleaner handled-work display taxonomy:
+- Receiving
+- FrzFlr
+- FrzMix
+- FrzPIR
+- DryFlr
+- DryMix
+- DryPIR
+- ClrPrdc
+- ClrMeat
+- ClrDairy
+- Unclassified
+
+Area detail is the deeper operational drilldown layer.
+It should preserve more granular observed-role buckets:
+- Freezer: FrzPut, FrzLet, FrzMix, FrzPIR
+- Dry: DryFlr, DryMix, DryPIR
+- Cooler: ClrPrdc, ClrMeat, ClrDairy
+
+Do not use assigned-role fields to fake observed role detail in either layer.
 
 ---
 
