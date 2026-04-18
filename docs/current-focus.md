@@ -92,6 +92,9 @@ Should remain:
 - comparison-focused
 - visually different from Sheet View
 - honest about the metric being shown
+- week-first, using Sunday as the default week start
+- able to show daily trend visibility inside the selected week
+- shaped as Weekly Overview, with Daily Overview as a day-scoped sibling path
 
 ### Area Views
 Should show:
@@ -123,8 +126,12 @@ FrzLet and FrzPut remain available as source diagnostics but roll into FrzFlr fo
 Unresolved handled work should remain Unclassified for review.
 
 Grouped Area Share and Grouped Area Totals now share the same Summary basis, controlled by:
-- value metric: Plates or Pieces
-- grouped-area work family: Replenishment, Receiving, or Total Handled
+- work family: Replenishment, Receiving, or Total Handled
+- value mode: Plates, Pieces, or Both
+
+Overview/Summary now treats the selected date as a Sunday-based week context and shows daily trends for replenishment plates, replenishment pieces, receiving plates, and receiving pieces.
+Trend day links open a day-scoped operational stats view that preserves the selected week context.
+Both value mode keeps plates and pieces together inside each section instead of duplicating views.
 
 Area detail remains more granular than Summary and should preserve useful source role distinctions for drilldown.
 

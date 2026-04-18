@@ -93,6 +93,9 @@ Summary view should remain:
 - chart-first
 - comparison-focused
 - clearly different from Sheet view
+- week-first, with Sunday as the default week start
+- able to show day-level trend and drilldown context without becoming a day table
+- structured as Weekly Overview, with Daily Overview as a day-scoped sibling direction
 
 ### Summary handled-work role buckets
 Summary handled-work by role should use canonical observed-work buckets from the UserLS team-groups path.
@@ -107,11 +110,24 @@ Produce displays as ClrPrdc in canonical handled-work views.
 Grouped Area Share and Grouped Area Totals should use the same explicit selected basis.
 
 Summary controls should keep these concepts separate:
-- value metric: Plates or Pieces
-- grouped-area work family: Replenishment, Receiving, or Total Handled
+- work family: Replenishment, Receiving, or Total Handled
+- value mode: Plates, Pieces, or Both
 
 Receiving area contribution should come from destination area buckets when available.
 Unresolved receiving destination work should remain visibly Unclassified rather than guessed into a cooler/freezer/dry subrole.
+Both value mode should present plates and pieces inside the same section rather than duplicating chart sections.
+
+### Weekly daily trend direction
+Overview/Summary is week-first by default.
+
+The active weekly Summary should show daily trend visibility for:
+- replenishment plates
+- replenishment pieces
+- receiving plates
+- receiving pieces
+
+Day links from the weekly trend should open a day-scoped operational stats view while preserving the selected Sunday-based week context.
+Daily trend content should sit below the primary weekly summary sections so Weekly Overview stays the default product entry point.
 
 ---
 
@@ -144,6 +160,9 @@ The project has a direction for it, but not the built tool.
 
 ### 4. Review / unclassified handling
 Unclassified role/area truth needs clearer review loops so the dashboard can improve over time instead of silently normalizing uncertainty.
+
+### 5. Lightweight comparison support
+Week and day comparison support is still desired, but should not be built as a broad new backend until the existing weekly and day-scoped data paths are stable enough to support it cleanly.
 
 ---
 

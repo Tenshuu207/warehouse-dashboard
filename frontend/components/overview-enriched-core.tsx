@@ -117,7 +117,23 @@ type TeamGroupsResponse = {
   }>;
 };
 
-type Metric = "Plates" | "Pieces";
+type DailyTrendRow = {
+  date: string;
+  hasData: boolean;
+  replenishmentPlates: number;
+  replenishmentPieces: number;
+  receivingPlates: number;
+  receivingPieces: number;
+};
+
+type OverviewWeeklyResponse = {
+  weekStart: string;
+  weekEnd: string;
+  dailyTrends?: DailyTrendRow[];
+};
+
+type ValueMode = "plates" | "pieces" | "both";
+type ValueKey = "plates" | "pieces";
 type GroupedAreaWorkFamily = "replenishment" | "receiving" | "totalHandled";
 
 type GroupedAreaWorkFamilyConfig = {
@@ -140,9 +156,15 @@ type GroupedAreaTotalsRow = {
 
 type GroupedAreaChartRow = {
   area: GroupedAreaName;
-  value: number;
+  plates: number;
+  pieces: number;
   workFamily: GroupedAreaWorkFamily;
-  metric: Metric;
+  valueMode: ValueMode;
+};
+
+type WorkFamilyValues = {
+  plates: number;
+  pieces: number;
 };
 
 const GROUPED_AREA_WORK_FAMILIES: GroupedAreaWorkFamilyConfig[] = [
@@ -160,6 +182,24 @@ const GROUPED_AREA_WORK_FAMILIES: GroupedAreaWorkFamilyConfig[] = [
     key: "totalHandled",
     label: "Total Handled",
     description: "Replenishment plus receiving work by grouped area.",
+  },
+];
+
+const VALUE_MODE_OPTIONS: Array<{ key: ValueMode; label: string; description: string }> = [
+  {
+    key: "plates",
+    label: "Plates",
+    description: "Show plate counts only.",
+  },
+  {
+    key: "pieces",
+    label: "Pieces",
+    description: "Show piece counts only.",
+  },
+  {
+    key: "both",
+    label: "Both",
+    description: "Show plates and pieces in the same section.",
   },
 ];
 
@@ -185,6 +225,15 @@ function chartFmt(value: unknown) {
   return fmt(Number(value || 0));
 }
 
+function formatDayLabel(date: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "numeric",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${date}T00:00:00Z`));
+}
+
 function shortChartFmt(value: unknown) {
   const numeric = Number(value || 0);
   if (Math.abs(numeric) >= 1000000) return `${(numeric / 1000000).toFixed(1)}M`;
@@ -192,27 +241,67 @@ function shortChartFmt(value: unknown) {
   return fmt(numeric);
 }
 
-function metricValue(record: { Plates: number; Pieces: number }, metric: Metric) {
-  return metric === "Plates" ? record.Plates : record.Pieces;
+function selectedValueKeys(valueMode: ValueMode): ValueKey[] {
+  return valueMode === "both" ? ["plates", "pieces"] : [valueMode];
 }
 
-function groupedAreaBasisValue(
-  row: GroupedAreaTotalsRow,
-  family: GroupedAreaWorkFamily,
-  metric: Metric
-): number {
-  const replenishment =
-    metric === "Plates" ? row.replenishmentPlates : row.replenishmentPieces;
-  const receiving = metric === "Plates" ? row.receivingPlates : row.receivingPieces;
+function valueModeLabel(valueMode: ValueMode) {
+  if (valueMode === "plates") return "plates";
+  if (valueMode === "pieces") return "pieces";
+  return "plates and pieces";
+}
 
+function valueKeyLabel(valueKey: ValueKey) {
+  return valueKey === "plates" ? "Plates" : "Pieces";
+}
+
+function hasSelectedValues(row: WorkFamilyValues, valueMode: ValueMode) {
+  return selectedValueKeys(valueMode).some((key) => row[key] > 0);
+}
+
+function compareByValueMode(a: WorkFamilyValues, b: WorkFamilyValues, valueMode: ValueMode) {
+  if (valueMode === "plates") return b.plates - a.plates;
+  if (valueMode === "pieces") return b.pieces - a.pieces;
+  return b.pieces - a.pieces || b.plates - a.plates;
+}
+
+function workFamilyValues(
+  row: {
+    replenishmentPlates: number;
+    replenishmentPieces: number;
+    receivingPlates: number;
+    receivingPieces: number;
+  },
+  family: GroupedAreaWorkFamily,
+): WorkFamilyValues {
   if (family === "replenishment") {
-    return replenishment;
+    return {
+      plates: row.replenishmentPlates,
+      pieces: row.replenishmentPieces,
+    };
   }
   if (family === "receiving") {
-    return receiving;
+    return {
+      plates: row.receivingPlates,
+      pieces: row.receivingPieces,
+    };
   }
 
-  return replenishment + receiving;
+  return {
+    plates: row.replenishmentPlates + row.receivingPlates,
+    pieces: row.replenishmentPieces + row.receivingPieces,
+  };
+}
+
+function renderValuePair(values: WorkFamilyValues, valueMode: ValueMode) {
+  if (valueMode === "plates") return shortChartFmt(values.plates);
+  if (valueMode === "pieces") return shortChartFmt(values.pieces);
+  return `${shortChartFmt(values.plates)} / ${shortChartFmt(values.pieces)}`;
+}
+
+function sharePercent(value: number, total: number) {
+  if (!total) return "0%";
+  return `${Math.round((value / total) * 100)}%`;
 }
 
 function normalizeToken(value: unknown) {
@@ -446,27 +535,28 @@ function ChartFrame({
   );
 }
 
-function MetricToggle({
-  metric,
+function ValueModeToggle({
+  valueMode,
   onChange,
 }: {
-  metric: Metric;
-  onChange: (metric: Metric) => void;
+  valueMode: ValueMode;
+  onChange: (valueMode: ValueMode) => void;
 }) {
   return (
     <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
-      {(["Plates", "Pieces"] as const).map((option) => (
+      {VALUE_MODE_OPTIONS.map((option) => (
         <button
-          key={option}
+          key={option.key}
           type="button"
-          onClick={() => onChange(option)}
+          onClick={() => onChange(option.key)}
+          title={option.description}
           className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-            metric === option
+            valueMode === option.key
               ? "bg-slate-900 text-white shadow-sm"
               : "text-slate-600 hover:bg-white hover:text-slate-900"
           }`}
         >
-          {option}
+          {option.label}
         </button>
       ))}
     </div>
@@ -503,12 +593,14 @@ function GroupedAreaFamilyToggle({
 export default function OverviewEnrichedCore() {
   const { selectedWeek } = useAppState();
   const [data, setData] = useState<TeamGroupsResponse | null>(null);
+  const [weeklyData, setWeeklyData] = useState<OverviewWeeklyResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [metric, setMetric] = useState<Metric>("Plates");
+  const [valueMode, setValueMode] = useState<ValueMode>("both");
   const [groupedAreaFamily, setGroupedAreaFamily] =
     useState<GroupedAreaWorkFamily>("totalHandled");
   const range = resolveContextRange(selectedWeek, null);
+  const weekStart = range.start;
 
   useEffect(() => {
     let cancelled = false;
@@ -518,17 +610,27 @@ export default function OverviewEnrichedCore() {
         setLoading(true);
         setError(null);
 
-        const res = await fetch(`/api/dashboard/team-groups?date=${selectedWeek}&source=userls`, {
-          cache: "no-store",
-        });
-        const json = (await res.json()) as TeamGroupsResponse & { details?: string };
+        const [teamGroupsRes, weeklyRes] = await Promise.all([
+          fetch(`/api/dashboard/team-groups?date=${weekStart}&source=userls`, {
+            cache: "no-store",
+          }),
+          fetch(`/api/dashboard/overview-weekly?weekStart=${weekStart}`, {
+            cache: "no-store",
+          }),
+        ]);
+        const json = (await teamGroupsRes.json()) as TeamGroupsResponse & { details?: string };
+        const weeklyJson = (await weeklyRes.json()) as OverviewWeeklyResponse & { details?: string };
 
-        if (!res.ok) {
+        if (!teamGroupsRes.ok) {
           throw new Error(json.details || "Failed to load overview enriched data");
+        }
+        if (!weeklyRes.ok) {
+          throw new Error(weeklyJson.details || "Failed to load weekly trend data");
         }
 
         if (!cancelled) {
           setData(json);
+          setWeeklyData(weeklyJson);
           setLoading(false);
         }
       } catch (err) {
@@ -539,12 +641,12 @@ export default function OverviewEnrichedCore() {
       }
     }
 
-    if (selectedWeek) load();
+    if (weekStart) load();
 
     return () => {
       cancelled = true;
     };
-  }, [selectedWeek]);
+  }, [weekStart]);
 
   const summary = useMemo(() => {
     const teams = data?.teams || [];
@@ -569,6 +671,16 @@ export default function OverviewEnrichedCore() {
       }
     );
   }, [data]);
+
+  const selectedSummaryValues = workFamilyValues(
+    {
+      replenishmentPlates: summary.replPlates,
+      replenishmentPieces: summary.replPieces,
+      receivingPlates: summary.recvPlates,
+      receivingPieces: summary.recvPieces,
+    },
+    groupedAreaFamily
+  );
 
   const activityMix = useMemo(() => {
     const activities = ["Letdowns", "Putaways", "Restocks", "Bulk Move"];
@@ -596,10 +708,25 @@ export default function OverviewEnrichedCore() {
       activityMix
         .map((row) => ({
           name: row.activity,
-          value: metricValue(row, metric),
+          plates: row.Plates,
+          pieces: row.Pieces,
         }))
-        .filter((row) => row.value > 0),
-    [activityMix, metric]
+        .filter((row) => hasSelectedValues(row, valueMode))
+        .sort((a, b) => compareByValueMode(a, b, valueMode)),
+    [activityMix, valueMode]
+  );
+
+  const dailyTrendRows = useMemo(
+    () =>
+      (weeklyData?.dailyTrends || []).map((row) => {
+        const values = workFamilyValues(row, groupedAreaFamily);
+        return {
+          ...row,
+          ...values,
+          day: formatDayLabel(row.date),
+        };
+      }),
+    [groupedAreaFamily, weeklyData]
   );
 
   const groupedAreaTotals = useMemo(() => {
@@ -649,13 +776,16 @@ export default function OverviewEnrichedCore() {
 
   const groupedAreaChartRows = useMemo<GroupedAreaChartRow[]>(
     () =>
-      groupedAreaTotals.map((row) => ({
-        area: row.area,
-        value: groupedAreaBasisValue(row, groupedAreaFamily, metric),
-        workFamily: groupedAreaFamily,
-        metric,
-      })),
-    [groupedAreaFamily, groupedAreaTotals, metric]
+      groupedAreaTotals.map((row) => {
+        const values = workFamilyValues(row, groupedAreaFamily);
+        return {
+          area: row.area,
+          ...values,
+          workFamily: groupedAreaFamily,
+          valueMode,
+        };
+      }),
+    [groupedAreaFamily, groupedAreaTotals, valueMode]
   );
 
   const groupedAreaShare = useMemo(
@@ -663,15 +793,32 @@ export default function OverviewEnrichedCore() {
       groupedAreaChartRows
         .map((row) => ({
           name: row.area,
-          value: row.value,
+          value: valueMode === "pieces" ? row.pieces : row.plates,
+          plates: row.plates,
+          pieces: row.pieces,
           workFamily: row.workFamily,
-          metric: row.metric,
+          valueMode: row.valueMode,
         }))
         .filter((row) => row.value > 0),
+    [groupedAreaChartRows, valueMode]
+  );
+
+  const groupedAreaShareTotals = useMemo(
+    () =>
+      groupedAreaChartRows.reduce(
+        (acc, row) => {
+          acc.plates += row.plates;
+          acc.pieces += row.pieces;
+          return acc;
+        },
+        { plates: 0, pieces: 0 }
+      ),
     [groupedAreaChartRows]
   );
 
-  const hasGroupedAreaChartRows = groupedAreaChartRows.some((row) => row.value > 0);
+  const hasGroupedAreaChartRows = groupedAreaChartRows.some((row) =>
+    hasSelectedValues(row, valueMode)
+  );
 
   const receivingByDestination = useMemo(() => {
     const destinations = ["Freezer", "Freezer PIR", "Dry", "Dry PIR", "Cooler", "Produce"];
@@ -728,35 +875,34 @@ export default function OverviewEnrichedCore() {
       receivingByDestination
         .map((row) => ({
           destination: row.destination,
-          value: metricValue(row, metric),
+          plates: row.Plates,
+          pieces: row.Pieces,
         }))
-        .filter((row) => row.value > 0),
-    [receivingByDestination, metric]
+        .filter((row) => hasSelectedValues(row, valueMode))
+        .sort((a, b) => compareByValueMode(a, b, valueMode)),
+    [receivingByDestination, valueMode]
   );
 
   const rolePerformance = useMemo(() => {
-    const sorted = [...(data?.observedWorkRoleBuckets || [])].sort((a, b) => {
-      const metricDiff =
-        (metric === "Plates" ? Number(b.plates || 0) : Number(b.pieces || 0)) -
-        (metric === "Plates" ? Number(a.plates || 0) : Number(a.pieces || 0));
-      if (metricDiff !== 0) return metricDiff;
-      return a.role.localeCompare(b.role);
-    });
-
-    return sorted
+    return [...(data?.observedWorkRoleBuckets || [])]
       .map((row) => ({
         role: row.role,
-        value: metric === "Plates" ? Number(row.plates || 0) : Number(row.pieces || 0),
+        ...workFamilyValues(row, groupedAreaFamily),
       }))
-      .filter((row) => row.value > 0)
+      .filter((row) => hasSelectedValues(row, valueMode))
+      .sort((a, b) => {
+        const valueDiff = compareByValueMode(a, b, valueMode);
+        if (valueDiff !== 0) return valueDiff;
+        return a.role.localeCompare(b.role);
+      })
       .slice(0, 12);
-  }, [data, metric]);
+  }, [data, groupedAreaFamily, valueMode]);
 
   const observedWorkUnclassifiedDiagnostics = useMemo(() => {
     return [...(data?.observedWorkRoleDiagnostics?.unclassified || [])].filter((row) => {
-      return (metric === "Plates" ? Number(row.plates || 0) : Number(row.pieces || 0)) > 0;
+      return hasSelectedValues({ plates: Number(row.plates || 0), pieces: Number(row.pieces || 0) }, valueMode);
     });
-  }, [data, metric]);
+  }, [data, valueMode]);
 
   const observedWorkSourceDiagnostics = useMemo(() => {
     return [...(data?.observedWorkRoleDiagnostics?.sourceBreakdown || [])].filter((row) => {
@@ -799,8 +945,8 @@ export default function OverviewEnrichedCore() {
   if (loading) {
     return (
       <section className="rounded-2xl bg-white border shadow-sm p-4">
-        <h3 className="text-lg font-bold">Summary View</h3>
-        <p className="mt-1 text-sm text-slate-500">Loading summary data...</p>
+        <h3 className="text-lg font-bold">Weekly Overview</h3>
+        <p className="mt-1 text-sm text-slate-500">Loading weekly overview data...</p>
       </section>
     );
   }
@@ -808,7 +954,7 @@ export default function OverviewEnrichedCore() {
   if (error) {
     return (
       <section className="rounded-2xl bg-white border shadow-sm p-4">
-        <h3 className="text-lg font-bold">Summary View</h3>
+        <h3 className="text-lg font-bold">Weekly Overview</h3>
         <p className="mt-1 text-sm text-red-600">{error}</p>
       </section>
     );
@@ -817,78 +963,140 @@ export default function OverviewEnrichedCore() {
   return (
     <section className="rounded-2xl bg-white border shadow-sm p-4 space-y-4">
       <PageHeader
-        title="Summary View"
-        subtitle="Chart-first weekly snapshot for activity mix, grouped areas, receiving destinations, and role performance."
+        title="Weekly Overview"
+        subtitle="Chart-first weekly snapshot for grouped areas, handled-work roles, and day-level drilldown."
       />
 
       <div className="grid grid-cols-2 xl:grid-cols-6 gap-3">
         <StatCard label="Teams">{summary.teams}</StatCard>
         <StatCard label="Operators">{summary.operators}</StatCard>
-        <StatCard label="Repl Plates">{fmt(summary.replPlates)}</StatCard>
-        <StatCard label="Repl Pieces">{fmt(summary.replPieces)}</StatCard>
-        <StatCard label="Receiving Plates">{fmt(summary.recvPlates)}</StatCard>
-        <StatCard label="Receiving Pieces">{fmt(summary.recvPieces)}</StatCard>
+        <StatCard label={`${groupedAreaFamilyConfig.label} Plates`}>
+          {fmt(selectedSummaryValues.plates)}
+        </StatCard>
+        <StatCard label={`${groupedAreaFamilyConfig.label} Pieces`}>
+          {fmt(selectedSummaryValues.pieces)}
+        </StatCard>
+        <StatCard label="Work Family">{groupedAreaFamilyConfig.label}</StatCard>
+        <StatCard label="Value Mode">
+          {VALUE_MODE_OPTIONS.find((option) => option.key === valueMode)?.label || "Both"}
+        </StatCard>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
         <div>
-          <div className="text-sm font-semibold text-slate-900">Metric</div>
+          <div className="text-sm font-semibold text-slate-900">Work Family</div>
           <p className="mt-1 text-xs text-slate-500">
-            Plates/Pieces controls the numeric value shown in every chart.
-          </p>
-        </div>
-        <MetricToggle metric={metric} onChange={setMetric} />
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
-        <div>
-          <div className="text-sm font-semibold text-slate-900">Grouped Area Work Family</div>
-          <p className="mt-1 text-xs text-slate-500">
-            Share and totals use the selected work family. Values follow the Plates/Pieces toggle.
+            Every weekly section uses this work basis.
           </p>
         </div>
         <GroupedAreaFamilyToggle value={groupedAreaFamily} onChange={setGroupedAreaFamily} />
       </div>
 
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+        <div>
+          <div className="text-sm font-semibold text-slate-900">Value Mode</div>
+          <p className="mt-1 text-xs text-slate-500">
+            Plates, pieces, or both metrics shown inside each selected section.
+          </p>
+        </div>
+        <ValueModeToggle valueMode={valueMode} onChange={setValueMode} />
+      </div>
+
       <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
-        {activityMixChart.length > 0 ? (
+        {groupedAreaFamily === "replenishment" && activityMixChart.length > 0 ? (
           <ChartPanel
-            title="Activity Mix"
-            description={`${metric} composition across displayed activity buckets.`}
+            title="Replenishment Activity Mix"
+            description={`Replenishment ${valueModeLabel(valueMode)} across displayed activity buckets.`}
           >
             <ChartFrame height={320}>
               {({ width, height }) => (
-                <PieChart
+                <BarChart
                   width={width}
                   height={height}
+                  data={activityMixChart}
+                  margin={{ top: 28, right: 12, bottom: 8, left: 0 }}
                 >
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="name" tickLine={false} axisLine={false} />
+                  <YAxis tickFormatter={chartFmt} tickLine={false} axisLine={false} width={72} />
                   <Tooltip formatter={(value: unknown) => chartFmt(value)} />
                   <Legend />
-                  <Pie
-                    data={activityMixChart}
-                    dataKey="value"
-                    nameKey="name"
-                    innerRadius={Math.min(width, height) * 0.22}
-                    outerRadius={Math.min(width, height) * 0.36}
-                    paddingAngle={2}
-                  >
-                    {activityMixChart.map((entry, index) => (
-                      <Cell
-                        key={`activity-${entry.name}`}
-                        fill={CHART_COLORS[index % CHART_COLORS.length]}
+                  {selectedValueKeys(valueMode).map((key, index) => (
+                    <Bar
+                      key={`activity-${key}`}
+                      dataKey={key}
+                      name={valueKeyLabel(key)}
+                      fill={CHART_COLORS[index % CHART_COLORS.length]}
+                      radius={[6, 6, 0, 0]}
+                    >
+                      <LabelList
+                        dataKey={key}
+                        position="top"
+                        formatter={(value: unknown) => shortChartFmt(value)}
+                        className="fill-slate-700 text-[11px] font-semibold"
                       />
-                    ))}
-                  </Pie>
-                </PieChart>
+                    </Bar>
+                  ))}
+                </BarChart>
               )}
             </ChartFrame>
           </ChartPanel>
         ) : null}
 
-        {groupedAreaShare.length > 0 ? (
+        {valueMode === "both" && hasGroupedAreaChartRows ? (
           <ChartPanel
             title="Grouped Area Share"
-            description={`${groupedAreaFamilyConfig.label} ${metric.toLowerCase()} share across grouped operational areas.`}
+            description={`${groupedAreaFamilyConfig.label} plates and pieces share across grouped operational areas.`}
+          >
+            <div className="space-y-3">
+              {groupedAreaChartRows
+                .filter((row) => hasSelectedValues(row, valueMode))
+                .map((row) => (
+                  <div key={`area-share-both-${row.area}`} className="rounded-lg border border-slate-200 p-3">
+                    <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+                      <div className="font-semibold text-slate-900">{row.area}</div>
+                      <div className="text-xs font-medium text-slate-500">
+                        {renderValuePair(row, valueMode)}
+                      </div>
+                    </div>
+                    <div className="space-y-2 text-xs">
+                      <div className="grid grid-cols-[56px_1fr_auto] items-center gap-2">
+                        <div className="font-medium text-slate-600">Plates</div>
+                        <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className="h-full rounded-full bg-blue-600"
+                            style={{
+                              width: sharePercent(row.plates, groupedAreaShareTotals.plates),
+                            }}
+                          />
+                        </div>
+                        <div className="font-semibold text-slate-700">
+                          {sharePercent(row.plates, groupedAreaShareTotals.plates)}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-[56px_1fr_auto] items-center gap-2">
+                        <div className="font-medium text-slate-600">Pieces</div>
+                        <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className="h-full rounded-full bg-violet-600"
+                            style={{
+                              width: sharePercent(row.pieces, groupedAreaShareTotals.pieces),
+                            }}
+                          />
+                        </div>
+                        <div className="font-semibold text-slate-700">
+                          {sharePercent(row.pieces, groupedAreaShareTotals.pieces)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </ChartPanel>
+        ) : groupedAreaShare.length > 0 ? (
+          <ChartPanel
+            title="Grouped Area Share"
+            description={`${groupedAreaFamilyConfig.label} ${valueModeLabel(valueMode)} share across grouped operational areas.`}
           >
             <ChartFrame height={320}>
               {({ width, height }) => (
@@ -921,7 +1129,7 @@ export default function OverviewEnrichedCore() {
         {hasGroupedAreaChartRows ? (
           <ChartPanel
             title="Grouped Area Totals"
-            description={`${groupedAreaFamilyConfig.label} ${metric.toLowerCase()} totals using the same basis as Grouped Area Share.`}
+            description={`${groupedAreaFamilyConfig.label} ${valueModeLabel(valueMode)} totals using the same basis as Grouped Area Share.`}
             footer={
               <div className="flex flex-wrap gap-2">
                 {groupedAreaChartRows.map((row) => (
@@ -949,29 +1157,32 @@ export default function OverviewEnrichedCore() {
                   <YAxis tickFormatter={chartFmt} tickLine={false} axisLine={false} width={72} />
                   <Tooltip formatter={(value: unknown) => chartFmt(value)} />
                   <Legend />
-                  <Bar
-                    dataKey="value"
-                    name={`${groupedAreaFamilyConfig.label} ${metric}`}
-                    fill="#0f766e"
-                    radius={[6, 6, 0, 0]}
-                  >
-                    <LabelList
-                      dataKey="value"
-                      position="top"
-                      formatter={(value: unknown) => shortChartFmt(value)}
-                      className="fill-slate-700 text-[11px] font-semibold"
-                    />
-                  </Bar>
+                  {selectedValueKeys(valueMode).map((key, index) => (
+                    <Bar
+                      key={`grouped-area-total-${key}`}
+                      dataKey={key}
+                      name={`${groupedAreaFamilyConfig.label} ${valueKeyLabel(key)}`}
+                      fill={index === 0 ? "#0f766e" : "#7c3aed"}
+                      radius={[6, 6, 0, 0]}
+                    >
+                      <LabelList
+                        dataKey={key}
+                        position="top"
+                        formatter={(value: unknown) => shortChartFmt(value)}
+                        className="fill-slate-700 text-[11px] font-semibold"
+                      />
+                    </Bar>
+                  ))}
                 </BarChart>
               )}
             </ChartFrame>
           </ChartPanel>
         ) : null}
 
-        {receivingByDestinationChart.length > 0 ? (
+        {groupedAreaFamily === "receiving" && receivingByDestinationChart.length > 0 ? (
           <ChartPanel
             title="Receiving by Destination"
-            description={`Receiving ${metric.toLowerCase()} split by destination mix.`}
+            description={`Receiving ${valueModeLabel(valueMode)} split by destination mix.`}
           >
             <ChartFrame height={360}>
               {({ width, height }) => (
@@ -993,7 +1204,15 @@ export default function OverviewEnrichedCore() {
                   />
                   <Tooltip formatter={(value: unknown) => chartFmt(value)} />
                   <Legend />
-                  <Bar dataKey="value" name={metric} fill="#7c3aed" radius={[0, 6, 6, 0]} />
+                  {selectedValueKeys(valueMode).map((key, index) => (
+                    <Bar
+                      key={`receiving-destination-${key}`}
+                      dataKey={key}
+                      name={valueKeyLabel(key)}
+                      fill={index === 0 ? "#7c3aed" : "#f97316"}
+                      radius={[0, 6, 6, 0]}
+                    />
+                  ))}
                 </BarChart>
               )}
             </ChartFrame>
@@ -1002,8 +1221,8 @@ export default function OverviewEnrichedCore() {
 
         {rolePerformance.length > 0 ? (
           <ChartPanel
-            title="Handled Work by Role"
-            description={`Canonical observed-work role buckets by handled ${metric.toLowerCase()}, including receiving.`}
+            title="Work by Role"
+            description={`${groupedAreaFamilyConfig.label} ${valueModeLabel(valueMode)} by canonical observed-work role buckets.`}
           >
             <ChartFrame height={360}>
               {({ width, height }) => (
@@ -1019,13 +1238,92 @@ export default function OverviewEnrichedCore() {
                   <YAxis type="category" dataKey="role" tickLine={false} axisLine={false} width={120} />
                   <Tooltip formatter={(value: unknown) => chartFmt(value)} />
                   <Legend />
-                  <Bar dataKey="value" name={metric} fill="#334155" radius={[0, 6, 6, 0]} />
+                  {selectedValueKeys(valueMode).map((key, index) => (
+                    <Bar
+                      key={`role-performance-${key}`}
+                      dataKey={key}
+                      name={valueKeyLabel(key)}
+                      fill={index === 0 ? "#334155" : "#0891b2"}
+                      radius={[0, 6, 6, 0]}
+                    />
+                  ))}
                 </BarChart>
               )}
             </ChartFrame>
           </ChartPanel>
         ) : null}
       </div>
+
+      {dailyTrendRows.length > 0 ? (
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Daily Trend Inside Week</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                {groupedAreaFamilyConfig.label} {valueModeLabel(valueMode)} by day. Select a day for Daily Overview.
+              </p>
+            </div>
+            <div className="text-xs font-medium text-slate-500">
+              {range.start} to {range.end}
+            </div>
+          </div>
+
+          <ChartFrame height={300}>
+            {({ width, height }) => (
+              <BarChart
+                width={width}
+                height={height}
+                data={dailyTrendRows}
+                margin={{ top: 28, right: 12, bottom: 8, left: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="day" tickLine={false} axisLine={false} />
+                <YAxis tickFormatter={chartFmt} tickLine={false} axisLine={false} width={72} />
+                <Tooltip formatter={(value: unknown) => chartFmt(value)} />
+                <Legend />
+                {selectedValueKeys(valueMode).map((key, index) => (
+                  <Bar
+                    key={`daily-trend-${key}`}
+                    dataKey={key}
+                    name={`${groupedAreaFamilyConfig.label} ${valueKeyLabel(key)}`}
+                    fill={index === 0 ? "#2563eb" : "#7c3aed"}
+                    radius={[6, 6, 0, 0]}
+                  >
+                    <LabelList
+                      dataKey={key}
+                      position="top"
+                      formatter={(value: unknown) => shortChartFmt(value)}
+                      className="fill-slate-700 text-[11px] font-semibold"
+                    />
+                  </Bar>
+                ))}
+              </BarChart>
+            )}
+          </ChartFrame>
+
+          <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
+            {dailyTrendRows.map((row) => (
+              <Link
+                key={row.date}
+                href={rangeHref(`/days/${row.date}`, range)}
+                className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm transition hover:border-slate-300 hover:bg-white"
+              >
+                <div className="font-semibold text-slate-900">{row.day}</div>
+                <div className="mt-1 text-xs text-slate-500">{row.date}</div>
+                <div className="mt-3 text-xs">
+                  <div className="text-slate-500">{groupedAreaFamilyConfig.label}</div>
+                  <div className="font-semibold text-slate-900">
+                    {renderValuePair(row, valueMode)}
+                  </div>
+                </div>
+                {!row.hasData ? (
+                  <div className="mt-2 text-[11px] font-medium text-slate-500">No daily source</div>
+                ) : null}
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </section>
   );
 }

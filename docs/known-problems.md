@@ -118,13 +118,27 @@ Summary is useful only if the chart is answering the right question.
 - use bars for exact comparisons
 - remove weak charts rather than keep misleading ones
 - role handled-work charts should consume canonical observed-work buckets directly, not assigned-role fields or pre-collapsed `roleGroups`
-- Grouped Area Share and Grouped Area Totals should use the same selected basis while keeping value metric separate from work family:
-  - value metric: Plates or Pieces
+- Summary sections should use the same selected basis while keeping selectors orthogonal:
   - work family: Replenishment, Receiving, or Total Handled
+  - value mode: Plates, Pieces, or Both
+- Both value mode should not create duplicate chart sections; plates and pieces should appear together inside the same section.
 
 ---
 
-## 6. Shift models are still only partially separated
+## 6. Comparison support is still intentionally shallow
+
+Weekly Summary now exposes daily trend and day drilldown context, but broader comparisons are still not fully built.
+
+### Desired direction
+- week vs previous week
+- selected day vs same day last week
+
+### Current direction
+Do not build a broad comparison backend until the weekly and day-scoped data paths can support it cleanly without mixing truth layers or inventing missing history.
+
+---
+
+## 7. Shift models are still only partially separated
 
 The project is still centered on day-shift replenishment logic.
 
@@ -139,7 +153,7 @@ Some stats may overlap, but performance logic should not be forced into one path
 
 ---
 
-## 7. Client-side fixes can hide deeper backend issues
+## 8. Client-side fixes can hide deeper backend issues
 
 Some issues can be improved in the client, but not truly solved there.
 
