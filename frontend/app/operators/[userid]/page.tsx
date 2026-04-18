@@ -19,6 +19,7 @@ import {
   type OperatorDefault,
   type RfMapping,
 } from "@/lib/employee-identity";
+import { resolveCanonicalAssignedDisplay } from "@/lib/area-labels";
 
 function performanceColor(p: number): string {
   if (p >= 110) return "text-green-600";
@@ -216,9 +217,20 @@ export default function OperatorDetailPage() {
       defaultTeams: defaults,
     });
 
+    const assignedDisplay = resolveCanonicalAssignedDisplay({
+      observedInferred: {
+        area: [base.effectiveAssignedArea, base.assignedArea, base.rawAssignedArea],
+        role: [base.effectiveAssignedRole, base.assignedRole, base.rawAssignedRole],
+      },
+      homeDefault: {
+        area: resolved.defaultTeam,
+      },
+    });
+
     return {
       ...base,
       resolvedName: resolved.displayName,
+      assignedDisplay,
     };
   }, [data, userid, scopeDate, employees, mappings, defaults]);
 
@@ -296,11 +308,11 @@ export default function OperatorDetailPage() {
                 </ContextBadge>
 
                 <ContextBadge variant="home-team">
-                  Effective Area: {operator.effectiveAssignedArea || "Unassigned"}
+                  Effective Area: {operator.assignedDisplay.area || "Unassigned"}
                 </ContextBadge>
 
                 <ContextBadge variant="observed-role">
-                  Effective Role: {operator.effectiveAssignedRole || "Unassigned"}
+                  Effective Role: {operator.assignedDisplay.role || "Unassigned"}
                 </ContextBadge>
 
                 <ContextBadge variant="context">
@@ -363,8 +375,8 @@ export default function OperatorDetailPage() {
                 <div className="space-y-3">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <StatCard label="Effective Assignment">
-                      {operator.effectiveAssignedArea || "Unassigned"} ·{" "}
-                      {operator.effectiveAssignedRole || "Unassigned"}
+                      {operator.assignedDisplay.area || "Unassigned"} ·{" "}
+                      {operator.assignedDisplay.role || "Unassigned"}
                     </StatCard>
                     <StatCard label="Performance Area">
                       {operator.effectivePerformanceArea || operator.rawDominantArea || "None"}

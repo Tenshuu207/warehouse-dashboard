@@ -9,6 +9,11 @@ import {
   type OperatorDefault,
   type RfMapping,
 } from "@/lib/employee-identity";
+import {
+  resolveAssignedAreaLabel,
+  resolveCanonicalAssignedDisplay,
+  resolveDisplayRoleLabel,
+} from "@/lib/area-labels";
 import type {
   DailyAssignmentsPayload,
   DailyOperatorPlacement,
@@ -52,6 +57,8 @@ type Row = {
   putawayPieces: number;
   restockPlates: number;
   restockPieces: number;
+  bulkMovePlates: number;
+  bulkMovePieces: number;
   totalPlates: number;
   totalPieces: number;
   receivingPlates: number;
@@ -150,44 +157,11 @@ function classifyFromRole(value: unknown): string | null {
 }
 
 function classifyFromArea(value: unknown): string | null {
-  const raw = String(value || "").trim();
-  const v = normalizeToken(value);
-  if (!v) return null;
-
-  if (raw === "7" || v.startsWith("7-") || v.startsWith("FRZPIR")) return "Freezer PIR";
-  if (raw === "5" || v.startsWith("5-") || v.startsWith("DRYPIR")) return "Dry PIR";
-
-  if (raw === "6" || v.startsWith("6-") || v.startsWith("FRZ")) return "Freezer";
-  if (raw === "1" || v.startsWith("1-") || v.startsWith("DRY")) return "Dry";
-
-  if (
-    raw === "2" ||
-    raw === "3" ||
-    raw === "4" ||
-    v.startsWith("2-") ||
-    v.startsWith("3-") ||
-    v.startsWith("4-") ||
-    v.startsWith("CLR") ||
-    v === "PRODUCE"
-  ) {
-    return "Cooler";
-  }
-
-  return null;
+  return resolveAssignedAreaLabel(value);
 }
 
 function classifyFromTeam(value: unknown): string | null {
-  const raw = String(value || "").trim();
-  const v = normalizeToken(value);
-  if (!v) return null;
-
-  if (raw === "Freezer PIR" || v === "FREEZERPIR" || v === "FRZPIR") return "Freezer PIR";
-  if (raw === "Dry PIR" || v === "DRYPIR") return "Dry PIR";
-  if (raw === "Freezer" || v === "FREEZER" || v === "FRZ") return "Freezer";
-  if (raw === "Dry" || v === "DRY") return "Dry";
-  if (raw === "Cooler" || v === "COOLER" || v === "CLR") return "Cooler";
-
-  return classifyFromArea(value) || classifyFromRole(value);
+  return resolveAssignedAreaLabel(value) || classifyFromRole(value);
 }
 
 function sectionOrderIndex(section: string) {
@@ -254,48 +228,6 @@ function TopListBox({
   );
 }
 
-function inferOfficialSectionFromOperator(
-  op: Record<string, unknown>,
-  fallbackTeam: string
-) {
-  const areaCandidates = [
-    op.effectiveAssignedArea,
-    op.assignedArea,
-    op.rawAssignedArea,
-    fallbackTeam,
-  ];
-
-  for (const value of areaCandidates) {
-    const section = classifyFromArea(value) || classifyFromTeam(value);
-    if (section) return section;
-  }
-
-  const roleCandidates = [
-    op.effectiveAssignedRole,
-    op.currentRole,
-    op.rawAssignedRole,
-  ];
-
-  for (const value of roleCandidates) {
-    const section = classifyFromRole(value);
-    if (section) return section;
-  }
-
-  return "Other";
-}
-
-function inferOfficialRoleFromOperator(op: Record<string, unknown>) {
-  const candidates = [
-    op.effectiveAssignedRole,
-    op.currentRole,
-    op.rawAssignedRole,
-  ]
-    .map((value) => String(value || "").trim())
-    .filter(Boolean);
-
-  return candidates[0] || "—";
-}
-
 function inferObservedSection(op: Record<string, unknown>) {
   const tracking = (op.userlsTracking || {}) as Tracking;
 
@@ -323,14 +255,13 @@ function inferObservedSection(op: Record<string, unknown>) {
 function inferObservedRole(op: Record<string, unknown>) {
   const tracking = (op.userlsTracking || {}) as Tracking;
 
-  const candidates = [
-    tracking.primaryReplenishmentRole,
-    op.observedRole,
-  ]
-    .map((value) => String(value || "").trim())
-    .filter(Boolean);
-
-  return candidates[0] || "—";
+  return (
+    resolveDisplayRoleLabel(
+      tracking.primaryReplenishmentRole,
+      op.observedRole,
+      op.currentRole
+    ) || "—"
+  );
 }
 
 function uniqueSorted(values: string[]) {
@@ -495,7 +426,7 @@ export default function DailySheetView() {
 
     for (const section of assignments?.sections || []) {
       const resolvedSection = classifyFromTeam(section.team) || section.team || "Other";
-      const resolvedRole = String(section.role || "").trim() || "—";
+      const resolvedRole = resolveDisplayRoleLabel(section.role) || "—";
 
       for (const employeeName of section.employees || []) {
         const key = normalizeNameKey(employeeName);
@@ -515,9 +446,9 @@ export default function DailySheetView() {
     const labels = new Map<string, string>();
 
     function add(value: unknown) {
-      const label = String(value || "").trim();
+      const label = resolveDisplayRoleLabel(value);
+      if (!label) return;
       const key = normalizeToken(label);
-      if (!label || !key || label === "—") return;
       if (!labels.has(key)) labels.set(key, label);
     }
 
@@ -578,21 +509,40 @@ export default function DailySheetView() {
       const assignmentKey = mergeKeyForEmployee(employeeId, name || fallbackName, userid);
       const placement = placementDrafts[assignmentKey];
 
-      const officialSectionBase =
-        homeTemplate?.section ||
-        classifyFromTeam(resolved.defaultTeam) ||
-        inferOfficialSectionFromOperator(op, resolved.defaultTeam);
-
-      const officialRoleBase =
-        homeTemplate?.role ||
-        inferOfficialRoleFromOperator(op);
+      const baseAssignedDisplay = resolveCanonicalAssignedDisplay({
+        observedInferred: {
+          area: [op.effectiveAssignedArea, op.assignedArea, op.rawAssignedArea],
+          role: [op.effectiveAssignedRole, op.assignedRole, op.rawAssignedRole],
+        },
+        homeDefault: {
+          area: [homeTemplate?.section, resolved.defaultTeam],
+          role: homeTemplate?.role,
+        },
+      });
 
       const sectionOverride = String(placement?.assignedSection || "").trim();
       const roleOverride = String(placement?.assignedRole || "").trim();
       const positionLabel = String(placement?.positionLabel || "").trim();
 
-      const effectiveSection = sectionOverride || officialSectionBase || "Other";
-      const effectiveRole = roleOverride || officialRoleBase || "—";
+      const effectiveAssignedDisplay = resolveCanonicalAssignedDisplay({
+        manualDaily: {
+          area: placement?.assignedSection,
+          role: placement?.assignedRole,
+        },
+        observedInferred: {
+          area: [op.effectiveAssignedArea, op.assignedArea, op.rawAssignedArea],
+          role: [op.effectiveAssignedRole, op.assignedRole, op.rawAssignedRole],
+        },
+        homeDefault: {
+          area: [homeTemplate?.section, resolved.defaultTeam],
+          role: homeTemplate?.role,
+        },
+      });
+
+      const officialSectionBase = baseAssignedDisplay.area;
+      const officialRoleBase = baseAssignedDisplay.role;
+      const effectiveSection = effectiveAssignedDisplay.area;
+      const effectiveRole = effectiveAssignedDisplay.role;
 
       const observedSection = inferObservedSection(op);
       const observedRole = inferObservedRole(op);
@@ -601,27 +551,15 @@ export default function DailySheetView() {
       const letdownPieces = safeNum(op.letdownPieces);
       const putawayPlates = safeNum(op.putawayPlates);
       const putawayPieces = safeNum(op.putawayPieces);
-      const restockPlates =
-        safeNum(op.restockPlates) ||
-        safeNum(op.restockLikePlatesEstimated) ||
-        safeNum(op.restockPlatesRaw);
-      const restockPieces =
-        safeNum(op.restockPieces) ||
-        safeNum(op.restockLikePiecesEstimated) ||
-        safeNum(op.restockPiecesRaw);
+      const restockPlates = safeNum(op.restockPlatesRaw) || safeNum(op.restockPlates);
+      const restockPieces = safeNum(op.restockPiecesRaw) || safeNum(op.restockPieces);
+      const bulkMovePlates = safeNum(op.restockLikePlatesEstimated);
+      const bulkMovePieces = safeNum(op.restockLikePiecesEstimated);
       const receivingPlates = safeNum(op.receivingPlates);
       const receivingPieces = safeNum(op.receivingPieces);
-      const totalPlates = letdownPlates + putawayPlates + restockPlates;
-      const totalPieces = letdownPieces + putawayPieces + restockPieces;
-      const area = String(
-        op.effectiveAssignedArea ||
-          op.assignedArea ||
-          op.rawAssignedArea ||
-          op.effectivePerformanceArea ||
-          op.rawDominantArea ||
-          op.area ||
-          effectiveSection
-      );
+      const totalPlates = letdownPlates + putawayPlates + restockPlates + bulkMovePlates;
+      const totalPieces = letdownPieces + putawayPieces + restockPieces + bulkMovePieces;
+      const area = effectiveSection;
 
       if (!grouped.has(assignmentKey)) {
         grouped.set(assignmentKey, {
@@ -646,6 +584,8 @@ export default function DailySheetView() {
           putawayPieces,
           restockPlates,
           restockPieces,
+          bulkMovePlates,
+          bulkMovePieces,
           totalPlates,
           totalPieces,
           receivingPlates,
@@ -665,6 +605,8 @@ export default function DailySheetView() {
       existing.putawayPieces += putawayPieces;
       existing.restockPlates += restockPlates;
       existing.restockPieces += restockPieces;
+      existing.bulkMovePlates += bulkMovePlates;
+      existing.bulkMovePieces += bulkMovePieces;
       existing.totalPlates += totalPlates;
       existing.totalPieces += totalPieces;
       existing.receivingPlates += receivingPlates;
@@ -720,6 +662,8 @@ export default function DailySheetView() {
           putawayPieces: row.putawayPieces,
           restockPlates: row.restockPlates,
           restockPieces: row.restockPieces,
+          bulkMovePlates: row.bulkMovePlates,
+          bulkMovePieces: row.bulkMovePieces,
           totalPlates: row.totalPlates,
           totalPieces: row.totalPieces,
           receivingPlates: row.receivingPlates,
@@ -828,7 +772,11 @@ export default function DailySheetView() {
     setPlacementDrafts((prev) => {
       const next: Record<string, DailyOperatorPlacement> = { ...prev };
       const current = next[row.assignmentKey];
-      const { assignmentKey: _ignoredAssignmentKey, ...currentWithoutAssignmentKey } = current || {};
+      const currentWithoutAssignmentKey = current ? { ...current } : null;
+
+      if (currentWithoutAssignmentKey) {
+        delete currentWithoutAssignmentKey.assignmentKey;
+      }
 
       const merged: DailyOperatorPlacement = {
         assignmentKey: row.assignmentKey,
@@ -943,19 +891,15 @@ export default function DailySheetView() {
           const letdownPieces = safeNum(bucket.letdownPieces);
           const putawayPlates = safeNum(bucket.putawayPlates);
           const putawayPieces = safeNum(bucket.putawayPieces);
-          const restockPlates =
-            safeNum(bucket.restockPlates) ||
-            safeNum(bucket.restockPlatesRaw) ||
-            safeNum(bucket.restockLikePlatesEstimated);
-          const restockPieces =
-            safeNum(bucket.restockPieces) ||
-            safeNum(bucket.restockPiecesRaw) ||
-            safeNum(bucket.restockLikePiecesEstimated);
+          const restockPlates = safeNum(bucket.restockPlatesRaw) || safeNum(bucket.restockPlates);
+          const restockPieces = safeNum(bucket.restockPiecesRaw) || safeNum(bucket.restockPieces);
+          const bulkMovePlates = safeNum(bucket.restockLikePlatesEstimated);
+          const bulkMovePieces = safeNum(bucket.restockLikePiecesEstimated);
 
           add(
             String(bucket.areaCode || bucket.area || bucket.label || bucket.name || "Other"),
-            letdownPlates + putawayPlates + restockPlates,
-            letdownPieces + putawayPieces + restockPieces
+            letdownPlates + putawayPlates + restockPlates + bulkMovePlates,
+            letdownPieces + putawayPieces + restockPieces + bulkMovePieces
           );
         }
         continue;
@@ -973,19 +917,15 @@ export default function DailySheetView() {
       const letdownPieces = safeNum(op.letdownPieces);
       const putawayPlates = safeNum(op.putawayPlates);
       const putawayPieces = safeNum(op.putawayPieces);
-      const restockPlates =
-        safeNum(op.restockPlates) ||
-        safeNum(op.restockLikePlatesEstimated) ||
-        safeNum(op.restockPlatesRaw);
-      const restockPieces =
-        safeNum(op.restockPieces) ||
-        safeNum(op.restockLikePiecesEstimated) ||
-        safeNum(op.restockPiecesRaw);
+      const restockPlates = safeNum(op.restockPlatesRaw) || safeNum(op.restockPlates);
+      const restockPieces = safeNum(op.restockPiecesRaw) || safeNum(op.restockPieces);
+      const bulkMovePlates = safeNum(op.restockLikePlatesEstimated);
+      const bulkMovePieces = safeNum(op.restockLikePiecesEstimated);
 
       add(
         fallbackArea,
-        letdownPlates + putawayPlates + restockPlates,
-        letdownPieces + putawayPieces + restockPieces
+        letdownPlates + putawayPlates + restockPlates + bulkMovePlates,
+        letdownPieces + putawayPieces + restockPieces + bulkMovePieces
       );
     }
 

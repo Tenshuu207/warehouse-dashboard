@@ -46,6 +46,7 @@ export type ResolvedDashboardData = {
 
     receivingPlates: number;
     receivingPieces: number;
+    receivingMix: unknown;
     totalPlates: number;
     totalPieces: number;
 
@@ -168,18 +169,10 @@ function normalizeRaw(raw: JsonObj): ResolvedDashboardData {
       : date;
 
   const summaryReplPlates =
-    summary.replenishmentPlates !== undefined
-      ? asNumber(summary.replenishmentPlates)
-      : summary.totalPlatesNoRecv !== undefined
-        ? asNumber(summary.totalPlatesNoRecv)
-        : asNumber(summary.totalPlates) - asNumber(summary.receivingPlates);
+    summary.replenishmentPlates !== undefined ? asNumber(summary.replenishmentPlates) : 0;
 
   const summaryReplPieces =
-    summary.replenishmentPieces !== undefined
-      ? asNumber(summary.replenishmentPieces)
-      : summary.totalPiecesNoRecv !== undefined
-        ? asNumber(summary.totalPiecesNoRecv)
-        : asNumber(summary.totalPieces) - asNumber(summary.receivingPieces);
+    summary.replenishmentPieces !== undefined ? asNumber(summary.replenishmentPieces) : 0;
 
   return {
     weeklySummary: {
@@ -212,24 +205,10 @@ function normalizeRaw(raw: JsonObj): ResolvedDashboardData {
       const restockPiecesRaw = asNumber(o.restockPiecesRaw);
       const restockLikePlatesEstimated = asNumber(o.restockLikePlatesEstimated);
       const restockLikePiecesEstimated = asNumber(o.restockLikePiecesEstimated);
-      const totalPlatesNoRecv = asNumber(o.totalPlatesNoRecv);
-      const totalPiecesNoRecv = asNumber(o.totalPiecesNoRecv);
-      const replenishmentNoRecvPlates = asNumber(o.replenishmentNoRecvPlates);
-      const replenishmentNoRecvPieces = asNumber(o.replenishmentNoRecvPieces);
 
-      const replenishmentPlates =
-        o.replenishmentPlates !== undefined
-          ? asNumber(o.replenishmentPlates)
-          : o.totalPlatesNoRecv !== undefined
-            ? asNumber(o.totalPlatesNoRecv)
-            : putawayPlates + letdownPlates + restockPlates;
+      const replenishmentPlates = o.replenishmentPlates !== undefined ? asNumber(o.replenishmentPlates) : 0;
 
-      const replenishmentPieces =
-        o.replenishmentPieces !== undefined
-          ? asNumber(o.replenishmentPieces)
-          : o.totalPiecesNoRecv !== undefined
-            ? asNumber(o.totalPiecesNoRecv)
-            : putawayPieces + letdownPieces + restockPieces;
+      const replenishmentPieces = o.replenishmentPieces !== undefined ? asNumber(o.replenishmentPieces) : 0;
 
       return {
         userid: asString(o.userid),
@@ -265,13 +244,15 @@ function normalizeRaw(raw: JsonObj): ResolvedDashboardData {
         restockPiecesRaw,
         restockLikePlatesEstimated,
         restockLikePiecesEstimated,
-        totalPlatesNoRecv,
-        totalPiecesNoRecv,
-        replenishmentNoRecvPlates,
-        replenishmentNoRecvPieces,
 
         receivingPlates: asNumber(o.receivingPlates),
         receivingPieces: asNumber(o.receivingPieces),
+        receivingMix:
+          o.receivingMix ??
+          o.receivingDestinationMix ??
+          o.receivingAreaMix ??
+          o.destinationMix ??
+          null,
         totalPlates: asNumber(o.totalPlates),
         totalPieces: asNumber(o.totalPieces),
 
@@ -322,18 +303,8 @@ function normalizeRaw(raw: JsonObj): ResolvedDashboardData {
 
     areas: asArray(raw.assignedAreas).map((item) => {
       const a = asObj(item);
-      const replPlates =
-        a.replenishmentPlates !== undefined
-          ? asNumber(a.replenishmentPlates)
-          : a.platesNoRecv !== undefined
-            ? asNumber(a.platesNoRecv)
-            : 0;
-      const replPieces =
-        a.replenishmentPieces !== undefined
-          ? asNumber(a.replenishmentPieces)
-          : a.piecesNoRecv !== undefined
-            ? asNumber(a.piecesNoRecv)
-            : 0;
+      const replPlates = a.replenishmentPlates !== undefined ? asNumber(a.replenishmentPlates) : 0;
+      const replPieces = a.replenishmentPieces !== undefined ? asNumber(a.replenishmentPieces) : 0;
 
       return {
         area: asString(a.area),

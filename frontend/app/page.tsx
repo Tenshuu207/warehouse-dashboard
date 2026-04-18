@@ -44,26 +44,35 @@ export default function HomePage() {
       <div className="max-w-[1800px] xl:ml-0 xl:mr-auto space-y-4 min-w-0">
         <ControlBar />
 
-        <section className="rounded-2xl bg-white border shadow-sm p-4 space-y-4">
+        <section className="rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-sm backdrop-blur space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <h2 className="text-xl font-bold">Overview</h2>
-              <p className="mt-1 text-xs text-slate-600">
-                Sheet-first operational command view with enriched detail still available.
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+                Operational front door
               </p>
-              <p className="mt-1 text-xs font-medium text-slate-500">
-                Active range: {rangeLabel(range)}
+              <h2 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">
+                Overview
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm text-slate-600">
+                Quick access to the active week, primary area drilldowns, receiving snapshot, and operator activity.
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                  Active range
+                </div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">{rangeLabel(range)}</div>
+              </div>
+
               <button
                 type="button"
                 onClick={() => setMode("sheet")}
-                className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                className={`rounded-xl border px-3 py-2 text-sm font-medium shadow-sm transition ${
                   mode === "sheet"
                     ? "border-slate-900 bg-slate-900 text-white"
-                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                    : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
                 }`}
               >
                 Sheet View
@@ -71,13 +80,13 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={() => setMode("detail")}
-                className={`rounded-lg border px-3 py-2 text-sm font-medium ${
+                className={`rounded-xl border px-3 py-2 text-sm font-medium shadow-sm transition ${
                   mode === "detail"
                     ? "border-slate-900 bg-slate-900 text-white"
-                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                    : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
                 }`}
               >
-                Detail View
+                Summary View
               </button>
             </div>
           </div>

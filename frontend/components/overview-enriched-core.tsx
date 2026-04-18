@@ -17,8 +17,8 @@ import {
 import { useAppState } from "@/lib/app-state";
 import { rangeHref, resolveContextRange } from "@/lib/date-range";
 import {
-  resolveDisplayRoleLabel,
   resolveOperationalAreaGroup,
+  resolveRolePerformanceLabel,
 } from "@/lib/area-labels";
 import PageHeader from "./shared/PageHeader";
 import StatCard from "./shared/StatCard";
@@ -57,6 +57,10 @@ type TeamGroupsResponse = {
       name: string;
       roleGroup: string;
       officialTeam: string | null;
+      assignedRole?: string | null;
+      rawAssignedRole?: string | null;
+      reviewAssignedRoleOverride?: string | null;
+      effectiveAssignedRole?: string | null;
       currentRole: string | null;
       observedRole: string | null;
       observedRoleShare: number | null;
@@ -196,8 +200,29 @@ function groupedDestinationLabel(value: unknown) {
   return groupedAreaLabel(destination || value);
 }
 
-function cleanedRolePerformanceLabel(value: unknown) {
-  return resolveDisplayRoleLabel(value) || "Mixed/Other";
+function rolePerformanceCandidates(
+  operator: TeamGroupsResponse["teams"][number]["operators"][number]
+) {
+  return [
+    operator.reviewAssignedRoleOverride,
+    operator.effectiveAssignedRole,
+    operator.assignedRole,
+    operator.rawAssignedRole,
+    operator.currentRole,
+    operator.roleGroup,
+    operator.observedRole,
+  ];
+}
+
+function operatorRolePerformanceLabel(
+  operator: TeamGroupsResponse["teams"][number]["operators"][number]
+) {
+  for (const candidate of rolePerformanceCandidates(operator)) {
+    const label = resolveRolePerformanceLabel(candidate);
+    if (label) return label;
+  }
+
+  return "Mixed/Other";
 }
 
 function addMixShare(grouped: Map<string, number>, areaValue: unknown, weightValue: unknown = 1) {
@@ -654,16 +679,16 @@ export default function OverviewEnrichedCore() {
     >();
 
     for (const team of data?.teams || []) {
-      for (const group of team.roleGroups || []) {
-        const label = cleanedRolePerformanceLabel(group.role);
+      for (const operator of team.operators || []) {
+        const label = operatorRolePerformanceLabel(operator);
         const row = grouped.get(label) || {
           role: label,
           Plates: 0,
           Pieces: 0,
         };
 
-        row.Plates += Number(group.replenishmentPlates || 0);
-        row.Pieces += Number(group.replenishmentPieces || 0);
+        row.Plates += Number(operator.replenishmentPlates || 0);
+        row.Pieces += Number(operator.replenishmentPieces || 0);
         grouped.set(label, row);
       }
     }
@@ -673,35 +698,74 @@ export default function OverviewEnrichedCore() {
       if (metricDiff !== 0) return metricDiff;
       return a.role.localeCompare(b.role);
     });
-    const top = sorted.slice(0, 7);
-    const rest = sorted.slice(7);
 
-    if (rest.length > 0) {
-      const mixedOther = top.find((row) => row.role === "Mixed/Other");
-      const restTotal = rest.reduce(
-        (acc, row) => {
-          acc.Plates += row.Plates;
-          acc.Pieces += row.Pieces;
-          return acc;
-        },
-        { role: "Mixed/Other", Plates: 0, Pieces: 0 }
-      );
-
-      if (mixedOther) {
-        mixedOther.Plates += restTotal.Plates;
-        mixedOther.Pieces += restTotal.Pieces;
-      } else {
-        top.push(restTotal);
-      }
-    }
-
-    return top
+    return sorted
       .map((row) => ({
         role: row.role,
         value: metricValue(row, metric),
       }))
-      .filter((row) => row.value > 0);
+      .filter((row) => row.value > 0)
+      .slice(0, 8);
   }, [data, metric]);
+
+  const rolePerformanceMixedDiagnostics = useMemo(() => {
+    const grouped = new Map<
+      string,
+      { label: string; Plates: number; Pieces: number; count: number; operators: string[] }
+    >();
+
+    for (const team of data?.teams || []) {
+      for (const operator of team.operators || []) {
+        if (operatorRolePerformanceLabel(operator) !== "Mixed/Other") continue;
+
+        const replenishment = {
+          Plates: Number(operator.replenishmentPlates || 0),
+          Pieces: Number(operator.replenishmentPieces || 0),
+        };
+
+        if (metricValue(replenishment, metric) <= 0) continue;
+
+        const candidateLabel =
+          rolePerformanceCandidates(operator)
+            .map((value) => String(value || "").trim())
+            .filter(Boolean)
+            .join(" | ") || "(blank)";
+
+        const label = `${team.team || "Unknown team"}: ${candidateLabel}`;
+        const row = grouped.get(label) || {
+          label,
+          Plates: 0,
+          Pieces: 0,
+          count: 0,
+          operators: [],
+        };
+
+        row.Plates += replenishment.Plates;
+        row.Pieces += replenishment.Pieces;
+        row.count += 1;
+        if (row.operators.length < 6) {
+          row.operators.push(operator.name || operator.userid);
+        }
+        grouped.set(label, row);
+      }
+    }
+
+    return [...grouped.values()]
+      .filter((row) => metricValue(row, metric) > 0)
+      .sort((a, b) => metricValue(b, metric) - metricValue(a, metric))
+      .slice(0, 12);
+  }, [data, metric]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development" || rolePerformanceMixedDiagnostics.length === 0) {
+      return;
+    }
+
+    console.info(
+      "[warehouse-dashboard] Role Performance Mixed/Other diagnostics",
+      rolePerformanceMixedDiagnostics
+    );
+  }, [rolePerformanceMixedDiagnostics]);
 
   if (loading) {
     return (
@@ -887,7 +951,7 @@ export default function OverviewEnrichedCore() {
         {rolePerformance.length > 0 ? (
           <ChartPanel
             title="Role Performance"
-            description={`Top cleaned role buckets by replenishment ${metric.toLowerCase()}. Unclassified roles are grouped into Mixed/Other.`}
+            description={`Top assignment-aligned role buckets by replenishment ${metric.toLowerCase()}. Unclassified operators are grouped into Mixed/Other.`}
           >
             <ChartFrame height={360}>
               {({ width, height }) => (
