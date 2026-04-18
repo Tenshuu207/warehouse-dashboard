@@ -80,6 +80,7 @@ export type UserlsObservedAssignment = {
   roleInferenceSource: "userls_transactions";
   roleInferenceThreshold: number;
   roleBreakdown: WorkloadBreakdownRow[];
+  handledWorkRoleBreakdown: WorkloadBreakdownRow[];
   areaBreakdown: WorkloadBreakdownRow[];
   receivingInference: ReceivingInferenceSummary;
 };
@@ -508,6 +509,7 @@ export function buildUserlsObservedAssignments(
       roleInferenceSource: "userls_transactions",
       roleInferenceThreshold: USERLS_ROLE_CONFIDENCE_THRESHOLD,
       roleBreakdown: familyRoleBreakdown.length ? familyRoleBreakdown : roleBreakdown,
+      handledWorkRoleBreakdown: roleBreakdown,
       areaBreakdown: familyBreakdown.length ? familyBreakdown : areaBreakdown,
       receivingInference: {
         receivedPlates: acc.receivedPlates,

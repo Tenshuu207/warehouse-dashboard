@@ -473,6 +473,7 @@ export async function buildUserlsOverviewWeek(weekStart: string) {
           observedRoleConfidence: observed?.observedRoleConfidence ?? null,
           mixedWorkFlag: observed?.mixedWorkFlag ?? false,
           roleBreakdown: observed?.roleBreakdown || [],
+          handledWorkRoleBreakdown: observed?.handledWorkRoleBreakdown || [],
           areaBreakdown: observed?.areaBreakdown || [],
           receivingInference: observed?.receivingInference || null,
           areaBuckets,

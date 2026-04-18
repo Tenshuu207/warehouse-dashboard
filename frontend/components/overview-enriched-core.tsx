@@ -7,6 +7,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  LabelList,
   Legend,
   Pie,
   PieChart,
@@ -14,6 +15,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import type { PieLabelRenderProps } from "recharts";
 import { useAppState } from "@/lib/app-state";
 import { rangeHref, resolveContextRange } from "@/lib/date-range";
 import PageHeader from "./shared/PageHeader";
@@ -53,8 +55,6 @@ type TeamGroupsResponse = {
     replenishmentPieces: number;
     receivingPlates: number;
     receivingPieces: number;
-    totalHandledPlates: number;
-    totalHandledPieces: number;
   }>;
   teams: Array<{
     team: string;
@@ -118,14 +118,6 @@ type TeamGroupsResponse = {
 };
 
 type Metric = "Plates" | "Pieces";
-type GroupedAreaMetric =
-  | "replenishmentPlates"
-  | "replenishmentPieces"
-  | "receivingPlates"
-  | "receivingPieces"
-  | "totalHandledPlates"
-  | "totalHandledPieces";
-
 type GroupedAreaWorkFamily = "replenishment" | "receiving" | "totalHandled";
 
 type GroupedAreaWorkFamilyConfig = {
@@ -136,6 +128,23 @@ type GroupedAreaWorkFamilyConfig = {
 
 const CHART_COLORS = ["#2563eb", "#0f766e", "#f97316", "#7c3aed", "#0891b2", "#475569"];
 const GROUPED_AREA_ORDER = ["Dry", "Cooler", "Freezer", "Unclassified"] as const;
+type GroupedAreaName = (typeof GROUPED_AREA_ORDER)[number];
+
+type GroupedAreaTotalsRow = {
+  area: GroupedAreaName;
+  replenishmentPlates: number;
+  replenishmentPieces: number;
+  receivingPlates: number;
+  receivingPieces: number;
+};
+
+type GroupedAreaChartRow = {
+  area: GroupedAreaName;
+  value: number;
+  workFamily: GroupedAreaWorkFamily;
+  metric: Metric;
+};
+
 const GROUPED_AREA_WORK_FAMILIES: GroupedAreaWorkFamilyConfig[] = [
   {
     key: "replenishment",
@@ -176,21 +185,34 @@ function chartFmt(value: unknown) {
   return fmt(Number(value || 0));
 }
 
+function shortChartFmt(value: unknown) {
+  const numeric = Number(value || 0);
+  if (Math.abs(numeric) >= 1000000) return `${(numeric / 1000000).toFixed(1)}M`;
+  if (Math.abs(numeric) >= 10000) return `${Math.round(numeric / 1000)}k`;
+  return fmt(numeric);
+}
+
 function metricValue(record: { Plates: number; Pieces: number }, metric: Metric) {
   return metric === "Plates" ? record.Plates : record.Pieces;
 }
 
-function groupedAreaMetricKey(
+function groupedAreaBasisValue(
+  row: GroupedAreaTotalsRow,
   family: GroupedAreaWorkFamily,
   metric: Metric
-): GroupedAreaMetric {
+): number {
+  const replenishment =
+    metric === "Plates" ? row.replenishmentPlates : row.replenishmentPieces;
+  const receiving = metric === "Plates" ? row.receivingPlates : row.receivingPieces;
+
   if (family === "replenishment") {
-    return metric === "Plates" ? "replenishmentPlates" : "replenishmentPieces";
+    return replenishment;
   }
   if (family === "receiving") {
-    return metric === "Plates" ? "receivingPlates" : "receivingPieces";
+    return receiving;
   }
-  return metric === "Plates" ? "totalHandledPlates" : "totalHandledPieces";
+
+  return replenishment + receiving;
 }
 
 function normalizeToken(value: unknown) {
@@ -316,6 +338,40 @@ function splitByMix(total: number, mix: Array<{ label: string; weight: number }>
     map.set(item.label, item.whole);
     return map;
   }, new Map<string, number>());
+}
+
+function renderGroupedAreaShareLabel(props: PieLabelRenderProps) {
+  const cx = Number(props.cx || 0);
+  const cy = Number(props.cy || 0);
+  const outerRadius = Number(props.outerRadius || 0);
+  const midAngle = Number(props.midAngle || 0);
+  const value = Number(props.value || 0);
+  const name = String(props.name || "");
+
+  if (!value) return null;
+
+  const radius = outerRadius + 18;
+  const radians = (-midAngle * Math.PI) / 180;
+  const x = cx + radius * Math.cos(radians);
+  const y = cy + radius * Math.sin(radians);
+  const textAnchor = x >= cx ? "start" : "end";
+
+  return (
+    <text
+      x={x}
+      y={y}
+      textAnchor={textAnchor}
+      dominantBaseline="central"
+      className="fill-slate-700 text-[11px] font-semibold"
+    >
+      <tspan x={x} dy="-0.35em">
+        {name}
+      </tspan>
+      <tspan x={x} dy="1.2em">
+        {shortChartFmt(value)}
+      </tspan>
+    </text>
+  );
 }
 
 function ChartPanel({
@@ -547,7 +603,7 @@ export default function OverviewEnrichedCore() {
   );
 
   const groupedAreaTotals = useMemo(() => {
-    const grouped = new Map(
+    const grouped = new Map<GroupedAreaName, GroupedAreaTotalsRow>(
       GROUPED_AREA_ORDER.map((area) => [
         area,
         {
@@ -556,15 +612,13 @@ export default function OverviewEnrichedCore() {
           replenishmentPieces: 0,
           receivingPlates: 0,
           receivingPieces: 0,
-          totalHandledPlates: 0,
-          totalHandledPieces: 0,
         },
       ])
     );
 
     for (const row of data?.groupedAreaWorkBuckets || []) {
-      const area = GROUPED_AREA_ORDER.includes(row.area as (typeof GROUPED_AREA_ORDER)[number])
-        ? (row.area as (typeof GROUPED_AREA_ORDER)[number])
+      const area = GROUPED_AREA_ORDER.includes(row.area as GroupedAreaName)
+        ? (row.area as GroupedAreaName)
         : "Unclassified";
       grouped.set(area, {
         area,
@@ -572,8 +626,6 @@ export default function OverviewEnrichedCore() {
         replenishmentPieces: Number(row.replenishmentPieces || 0),
         receivingPlates: Number(row.receivingPlates || 0),
         receivingPieces: Number(row.receivingPieces || 0),
-        totalHandledPlates: Number(row.totalHandledPlates || 0),
-        totalHandledPieces: Number(row.totalHandledPieces || 0),
       });
     }
 
@@ -595,29 +647,31 @@ export default function OverviewEnrichedCore() {
     [groupedAreaFamily]
   );
 
-  const groupedAreaMetric = useMemo(
-    () => groupedAreaMetricKey(groupedAreaFamily, metric),
-    [groupedAreaFamily, metric]
-  );
-
-  const groupedAreaComparison = useMemo(
+  const groupedAreaChartRows = useMemo<GroupedAreaChartRow[]>(
     () =>
       groupedAreaTotals.map((row) => ({
         area: row.area,
-        value: row[groupedAreaMetric],
+        value: groupedAreaBasisValue(row, groupedAreaFamily, metric),
+        workFamily: groupedAreaFamily,
+        metric,
       })),
-    [groupedAreaMetric, groupedAreaTotals]
+    [groupedAreaFamily, groupedAreaTotals, metric]
   );
 
   const groupedAreaShare = useMemo(
     () =>
-      groupedAreaComparison
-        .map((row) => ({ name: row.area, value: row.value }))
+      groupedAreaChartRows
+        .map((row) => ({
+          name: row.area,
+          value: row.value,
+          workFamily: row.workFamily,
+          metric: row.metric,
+        }))
         .filter((row) => row.value > 0),
-    [groupedAreaComparison]
+    [groupedAreaChartRows]
   );
 
-  const hasGroupedAreaComparison = groupedAreaComparison.some((row) => row.value > 0);
+  const hasGroupedAreaChartRows = groupedAreaChartRows.some((row) => row.value > 0);
 
   const receivingByDestination = useMemo(() => {
     const destinations = ["Freezer", "Freezer PIR", "Dry", "Dry PIR", "Cooler", "Produce"];
@@ -838,7 +892,7 @@ export default function OverviewEnrichedCore() {
           >
             <ChartFrame height={320}>
               {({ width, height }) => (
-                <PieChart width={width} height={height}>
+                <PieChart width={width} height={height} margin={{ top: 20, right: 28, bottom: 20, left: 28 }}>
                   <Tooltip formatter={(value: unknown) => chartFmt(value)} />
                   <Legend />
                   <Pie
@@ -846,8 +900,10 @@ export default function OverviewEnrichedCore() {
                     dataKey="value"
                     nameKey="name"
                     innerRadius={Math.min(width, height) * 0.22}
-                    outerRadius={Math.min(width, height) * 0.36}
+                    outerRadius={Math.min(width, height) * 0.32}
                     paddingAngle={2}
+                    label={renderGroupedAreaShareLabel}
+                    labelLine={{ stroke: "#94a3b8", strokeWidth: 1 }}
                   >
                     {groupedAreaShare.map((entry, index) => (
                       <Cell
@@ -862,13 +918,13 @@ export default function OverviewEnrichedCore() {
           </ChartPanel>
         ) : null}
 
-        {hasGroupedAreaComparison ? (
+        {hasGroupedAreaChartRows ? (
           <ChartPanel
             title="Grouped Area Totals"
             description={`${groupedAreaFamilyConfig.label} ${metric.toLowerCase()} totals using the same basis as Grouped Area Share.`}
             footer={
               <div className="flex flex-wrap gap-2">
-                {groupedAreaComparison.map((row) => (
+                {groupedAreaChartRows.map((row) => (
                   <Link
                     key={row.area}
                     href={rangeHref(`/areas/${encodeURIComponent(row.area.toLowerCase())}`, range)}
@@ -885,8 +941,8 @@ export default function OverviewEnrichedCore() {
                 <BarChart
                   width={width}
                   height={height}
-                  data={groupedAreaComparison}
-                  margin={{ top: 8, right: 12, bottom: 8, left: 0 }}
+                  data={groupedAreaChartRows}
+                  margin={{ top: 28, right: 12, bottom: 8, left: 0 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="area" tickLine={false} axisLine={false} />
@@ -898,7 +954,14 @@ export default function OverviewEnrichedCore() {
                     name={`${groupedAreaFamilyConfig.label} ${metric}`}
                     fill="#0f766e"
                     radius={[6, 6, 0, 0]}
-                  />
+                  >
+                    <LabelList
+                      dataKey="value"
+                      position="top"
+                      formatter={(value: unknown) => shortChartFmt(value)}
+                      className="fill-slate-700 text-[11px] font-semibold"
+                    />
+                  </Bar>
                 </BarChart>
               )}
             </ChartFrame>
